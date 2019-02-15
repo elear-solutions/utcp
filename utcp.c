@@ -1594,6 +1594,29 @@ int utcp_shutdown(struct utcp_connection *c, int dir) {
 	return 0;
 }
 
+// Closes all the opened connections
+int utcp_abort_all_connections(struct utcp *utcp) {
+	if(!utcp) {
+		return -1;
+	}
+
+	int total_connections = utcp->nconnections;
+
+	for(int i = 0; i < total_connections; i++) {
+		struct utcp_connection *c = utcp->connections[i];
+
+		if(c->recv) {
+      errno = 0;
+			c->recv(c, NULL, 0);
+    }
+
+		if(utcp_abort(c) != -1) {
+      utcp->nconnections = utcp->nconnections - 1;
+		}
+	}
+  return utcp->nconnections;
+}
+
 int utcp_close(struct utcp_connection *c) {
 	if(utcp_shutdown(c, SHUT_RDWR) && errno != ENOTCONN) {
 		return -1;
