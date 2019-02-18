@@ -624,8 +624,9 @@ ssize_t utcp_send(struct utcp_connection *c, const void *data, size_t len) {
 
 	// Don't send anything yet if the connection has not fully established yet
 
-	if (c->state == SYN_SENT || c->state == SYN_RECEIVED)
+	if(c->state == SYN_SENT || c->state == SYN_RECEIVED) {
 		return len;
+	}
 
 	ack(c, false);
 
@@ -1356,12 +1357,14 @@ skip_ack:
 
 			c->rcv.irs = hdr.seq;
 			c->rcv.nxt = hdr.seq;
+
 			if(c->shut_wr) {
 				c->snd.last++;
 				set_state(c, FIN_WAIT_1);
 			} else {
 				set_state(c, ESTABLISHED);
 			}
+
 			// TODO: notify application of this somehow.
 			break;
 
@@ -1550,8 +1553,9 @@ int utcp_shutdown(struct utcp_connection *c, int dir) {
 	}
 
 	// Only process shutting down writes once.
-	if (c->shut_wr)
+	if(c->shut_wr) {
 		return 0;
+	}
 
 	c->shut_wr = true;
 
@@ -1595,40 +1599,28 @@ int utcp_shutdown(struct utcp_connection *c, int dir) {
 }
 
 // Closes all the opened connections
-int utcp_abort_all_connections(struct utcp *utcp) {
+void utcp_abort_all_connections(struct utcp *utcp) {
 	if(!utcp) {
-		return -1;
+		return;
 	}
 
-	int total_connections = utcp->nconnections;
-
-	for(int i = 0; i < total_connections; i++) {
+	for(int i = 0; i < utcp->nconnections; i++) {
 		struct utcp_connection *c = utcp->connections[i];
 
 		if(c->recv) {
-      errno = 0;
+			errno = 0;
 			c->recv(c, NULL, 0);
-    }
+		}
 
-		if(utcp_abort(c) != -1) {
-      utcp->nconnections = utcp->nconnections - 1;
+		if(utcp_reset_connection(c) != -1) {
+			c->reapable = false;
 		}
 	}
-  return utcp->nconnections;
+
+	return;
 }
 
-int utcp_close(struct utcp_connection *c) {
-	if(utcp_shutdown(c, SHUT_RDWR) && errno != ENOTCONN) {
-		return -1;
-	}
-
-	c->recv = NULL;
-	c->poll = NULL;
-	c->reapable = true;
-	return 0;
-}
-
-int utcp_abort(struct utcp_connection *c) {
+int utcp_reset_connection(struct utcp_connection *c) {
 	if(!c) {
 		errno = EFAULT;
 		return -1;
@@ -1642,7 +1634,6 @@ int utcp_abort(struct utcp_connection *c) {
 
 	c->recv = NULL;
 	c->poll = NULL;
-	c->reapable = true;
 
 	switch(c->state) {
 	case CLOSED:
@@ -1679,6 +1670,29 @@ int utcp_abort(struct utcp_connection *c) {
 	print_packet(c->utcp, "send", &hdr, sizeof(hdr));
 	c->utcp->send(c->utcp, &hdr, sizeof(hdr));
 	return 0;
+}
+
+int utcp_close(struct utcp_connection *c) {
+	if(utcp_shutdown(c, SHUT_RDWR) && errno != ENOTCONN) {
+		return -1;
+	}
+
+	c->recv = NULL;
+	c->poll = NULL;
+	c->reapable = true;
+	return 0;
+}
+
+int utcp_abort(struct utcp_connection *c) {
+	int utcp_reset_return;
+
+	utcp_reset_return = utcp_reset_connection(c);
+
+	if(utcp_reset_return != -1) {
+		c->reapable = true;
+	}
+
+	return utcp_reset_return;
 }
 
 /* Handle timeouts.
@@ -1862,8 +1876,9 @@ size_t utcp_get_sndbuf(struct utcp_connection *c) {
 }
 
 size_t utcp_get_sndbuf_free(struct utcp_connection *c) {
-	if (!c)
+	if(!c) {
 		return 0;
+	}
 
 	switch(c->state) {
 	case SYN_SENT:

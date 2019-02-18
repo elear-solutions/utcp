@@ -77,7 +77,8 @@ extern void utcp_set_recv_cb(struct utcp_connection *connection, utcp_recv_t rec
 extern void utcp_set_poll_cb(struct utcp_connection *connection, utcp_poll_t poll);
 extern void utcp_set_accept_cb(struct utcp *utcp, utcp_accept_t accept, utcp_pre_accept_t pre_accept);
 extern bool utcp_is_active(struct utcp *utcp);
-extern int utcp_abort_all_connections(struct utcp *utcp);
+extern void utcp_abort_all_connections(struct utcp *utcp);
+extern int utcp_reset_connection(struct utcp_connection *c);
 
 // Global socket options
 
