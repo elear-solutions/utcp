@@ -629,6 +629,8 @@ ssize_t utcp_send(struct utcp_connection *c, const void *data, size_t len) {
 
 	if(is_reliable(c) || (c->state != SYN_SENT && c->state != SYN_RECEIVED)) {
 		len = buffer_put(&c->sndbuf, data, len);
+	} else {
+		return 0;
 	}
 
 	if(len <= 0) {
