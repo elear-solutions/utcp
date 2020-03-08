@@ -688,6 +688,59 @@ static void swap_ports(struct hdr *hdr) {
 	hdr->dst = tmp;
 }
 
+static void fast_retransmit(struct utcp_connection *c) {
+	if(c->state == CLOSED || c->snd.last == c->snd.una) {
+		debug("fast_retransmit() called but nothing to retransmit!\n");
+		return;
+	}
+
+	struct utcp *utcp = c->utcp;
+
+	struct {
+		struct hdr hdr;
+		uint8_t data[];
+	} *pkt;
+
+	pkt = malloc(sizeof(pkt->hdr) + c->utcp->mtu);
+
+	if(!pkt) {
+		return;
+	}
+
+	pkt->hdr.src = c->src;
+	pkt->hdr.dst = c->dst;
+	pkt->hdr.wnd = c->rcvbuf.maxsize;
+	pkt->hdr.aux = 0;
+
+	switch(c->state) {
+	case ESTABLISHED:
+	case FIN_WAIT_1:
+	case CLOSE_WAIT:
+	case CLOSING:
+	case LAST_ACK:
+		// Send unacked data again.
+		pkt->hdr.seq = c->snd.una;
+		pkt->hdr.ack = c->rcv.nxt;
+		pkt->hdr.ctl = ACK;
+		uint32_t len = min(seqdiff(c->snd.last, c->snd.una), utcp->mtu);
+
+		if(fin_wanted(c, c->snd.una + len)) {
+			len--;
+			pkt->hdr.ctl |= FIN;
+		}
+
+		buffer_copy(&c->sndbuf, pkt->data, 0, len);
+		print_packet(c->utcp, "rtrx", pkt, sizeof(pkt->hdr) + len);
+		utcp->send(utcp, pkt, sizeof(pkt->hdr) + len);
+		break;
+
+	default:
+		break;
+	}
+
+	free(pkt);
+}
+
 static void retransmit(struct utcp_connection *c) {
 	if(c->state == CLOSED || c->snd.last == c->snd.una) {
 		debug("Retransmit() called but nothing to retransmit!\n");
@@ -1350,7 +1403,13 @@ synack:
 
 		c->snd.una = hdr.ack;
 
-		c->dupack = 0;
+		if(c->dupack) {
+			if(c->dupack >= 3) {
+				c->snd.cwnd = c->snd.ssthresh;
+			}
+
+			c->dupack = 0;
+		}
 
 		// Increase the congestion window according to RFC 5681
 		if(c->snd.cwnd < c->snd.ssthresh) {
@@ -1392,13 +1451,26 @@ synack:
 
 			if(c->dupack == 3) {
 				debug("Triplicate ACK\n");
-				//TODO: Resend one packet and go to fast recovery mode. See RFC 6582.
-				//We do a very simple variant here; reset the nxt pointer to the last acknowledged packet from the peer.
-				//Reset the congestion window so we wait for ACKs.
-				c->snd.nxt = c->snd.una;
-				c->snd.cwnd = utcp->mtu;
+
+				// RFC 5681 fast recovery
+				c->snd.ssthresh = max(c->snd.cwnd / 2, utcp->mtu * 2); // eq. 4
+				c->snd.cwnd = max(c->snd.ssthresh + 3 * utcp->mtu, c->sndbuf.maxsize);
+
+				if(c->snd.cwnd > c->sndbuf.maxsize) {
+					c->snd.cwnd = c->sndbuf.maxsize;
+				}
+
 				debug_cwnd(c);
-				start_retransmit_timer(c);
+
+				fast_retransmit(c);
+			} else if(c->dupack > 3) {
+				c->snd.cwnd += utcp->mtu;
+
+				if(c->snd.cwnd > c->sndbuf.maxsize) {
+					c->snd.cwnd = c->sndbuf.maxsize;
+				}
+
+				debug_cwnd(c);
 			}
 		}
 	}
