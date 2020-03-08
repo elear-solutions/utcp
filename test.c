@@ -31,7 +31,7 @@ double dropout;
 long total_out;
 long total_in;
 FILE *reference;
-long mtu = 1300;
+long mtu = 0;
 
 char *reorder_data;
 size_t reorder_len;
@@ -132,6 +132,21 @@ ssize_t do_send(struct utcp *utcp, const void *data, size_t len) {
 	}
 
 	return result;
+}
+
+static void set_mtu(struct utcp *u, int s) {
+	if(!mtu) {
+		socklen_t optlen = sizeof(mtu);
+		getsockopt(s, IPPROTO_IP, IP_MTU, &mtu, &optlen);
+	}
+
+	if(!mtu || mtu == 65535) {
+		mtu = 1500;
+	}
+
+	fprintf(stderr, "Using MTU %lu\n", mtu);
+
+	utcp_set_mtu(u, mtu ? mtu - 48 : 1300);
 }
 
 int main(int argc, char *argv[]) {
@@ -240,10 +255,10 @@ int main(int argc, char *argv[]) {
 		return 1;
 	}
 
-	utcp_set_mtu(u, mtu);
 	utcp_set_user_timeout(u, 10);
 
 	if(!server) {
+		set_mtu(u, s);
 		c = utcp_connect_ex(u, 1, do_recv, NULL, flags);
 	}
 
@@ -318,10 +333,12 @@ int main(int argc, char *argv[]) {
 				break;
 			}
 
-			if(!connected)
+			if(!connected) {
 				if(!connect(s, (struct sockaddr *)&ss, sl)) {
 					connected = true;
+					set_mtu(u, s);
 				}
+			}
 
 			inpktno++;
 
