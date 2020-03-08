@@ -521,10 +521,14 @@ static void ack(struct utcp_connection *c, bool sendatleastone) {
 
 	assert(left >= 0);
 
-	if(cwndleft < 0) {
+	if(cwndleft <= 0) {
 		left = 0;
 	} else if(cwndleft < left) {
 		left = cwndleft;
+
+		if(!sendatleastone || cwndleft > c->utcp->mtu) {
+			left -= left % c->utcp->mtu;
+		}
 	}
 
 	debug("cwndleft = %d, left = %d\n", cwndleft, left);
