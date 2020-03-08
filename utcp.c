@@ -382,7 +382,6 @@ static struct utcp_connection *allocate_connection(struct utcp *utcp, uint16_t s
 #endif
 	c->snd.una = c->snd.iss;
 	c->snd.nxt = c->snd.iss + 1;
-	c->rcv.wnd = utcp->mtu;
 	c->snd.last = c->snd.nxt;
 	c->snd.cwnd = utcp->mtu;
 	c->utcp = utcp;
@@ -468,7 +467,7 @@ struct utcp_connection *utcp_connect_ex(struct utcp *utcp, uint16_t dst, utcp_re
 	pkt.hdr.dst = c->dst;
 	pkt.hdr.seq = c->snd.iss;
 	pkt.hdr.ack = 0;
-	pkt.hdr.wnd = c->rcv.wnd;
+	pkt.hdr.wnd = c->rcvbuf.maxsize;
 	pkt.hdr.ctl = SYN;
 	pkt.hdr.aux = 0x0101;
 	pkt.init[0] = 1;
@@ -538,7 +537,7 @@ static void ack(struct utcp_connection *c, bool sendatleastone) {
 	pkt->hdr.src = c->src;
 	pkt->hdr.dst = c->dst;
 	pkt->hdr.ack = c->rcv.nxt;
-	pkt->hdr.wnd = c->snd.wnd;
+	pkt->hdr.wnd = c->rcvbuf.maxsize;
 	pkt->hdr.ctl = ACK;
 	pkt->hdr.aux = 0;
 
@@ -697,7 +696,7 @@ static void retransmit(struct utcp_connection *c) {
 
 	pkt->hdr.src = c->src;
 	pkt->hdr.dst = c->dst;
-	pkt->hdr.wnd = c->rcv.wnd;
+	pkt->hdr.wnd = c->rcvbuf.maxsize;
 	pkt->hdr.aux = 0;
 
 	switch(c->state) {
@@ -1073,7 +1072,7 @@ synack:
 			pkt.hdr.dst = c->dst;
 			pkt.hdr.ack = c->rcv.irs + 1;
 			pkt.hdr.seq = c->snd.iss;
-			pkt.hdr.wnd = c->rcv.wnd;
+			pkt.hdr.wnd = c->rcvbuf.maxsize;
 			pkt.hdr.ctl = SYN | ACK;
 
 			if(init) {

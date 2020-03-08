@@ -129,7 +129,6 @@ struct utcp_connection {
 
 	struct {
 		uint32_t nxt;
-		uint32_t wnd;
 		uint32_t irs;
 	} rcv;
 
