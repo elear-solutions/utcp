@@ -54,6 +54,10 @@
 	} while (0)
 #endif
 
+static inline size_t min(size_t a, size_t b) {
+	return a < b ? a : b;
+}
+
 static inline size_t max(size_t a, size_t b) {
 	return a > b ? a : b;
 }
@@ -113,9 +117,14 @@ static void print_packet(struct utcp *utcp, const char *dir, const void *pkt, si
 
 	debug("\n");
 }
+
+static void debug_cwnd(struct utcp_connection *c) {
+	debug("snd.cwnd = %u\n", c->snd.cwnd);
+}
 #else
 #define debug(...) do {} while(0)
 #define print_packet(...) do {} while(0)
+#define debug_cwnd(...) do {} while(0)
 #endif
 
 static void set_state(struct utcp_connection *c, enum state state) {
@@ -383,7 +392,9 @@ static struct utcp_connection *allocate_connection(struct utcp *utcp, uint16_t s
 	c->snd.una = c->snd.iss;
 	c->snd.nxt = c->snd.iss + 1;
 	c->snd.last = c->snd.nxt;
-	c->snd.cwnd = utcp->mtu;
+	c->snd.cwnd = (utcp->mtu > 2190 ? 2 : utcp->mtu > 1095 ? 3 : 4) * utcp->mtu;
+	c->snd.ssthresh = ~0;
+	debug_cwnd(c);
 	c->utcp = utcp;
 
 	// Add it to the sorted list of connections
@@ -506,18 +517,17 @@ void utcp_accept(struct utcp_connection *c, utcp_recv_t recv, void *priv) {
 
 static void ack(struct utcp_connection *c, bool sendatleastone) {
 	int32_t left = seqdiff(c->snd.last, c->snd.nxt);
-	int32_t cwndleft = c->snd.cwnd - seqdiff(c->snd.nxt, c->snd.una);
-	debug("cwndleft = %d\n", cwndleft);
+	int32_t cwndleft = min(c->snd.cwnd, c->snd.wnd) - seqdiff(c->snd.nxt, c->snd.una);
 
 	assert(left >= 0);
 
-	if(cwndleft <= 0) {
-		cwndleft = 0;
-	}
-
-	if(cwndleft < left) {
+	if(cwndleft < 0) {
+		left = 0;
+	} else if(cwndleft < left) {
 		left = cwndleft;
 	}
+
+	debug("cwndleft = %d, left = %d\n", cwndleft, left);
 
 	if(!left && !sendatleastone) {
 		return;
@@ -744,7 +754,12 @@ static void retransmit(struct utcp_connection *c) {
 		}
 
 		c->snd.nxt = c->snd.una + len;
-		c->snd.cwnd = utcp->mtu; // reduce cwnd on retransmit
+
+		// RFC 5681 slow start after timeout
+		c->snd.ssthresh = max(c->snd.cwnd / 2, utcp->mtu * 2); // eq. 4
+		c->snd.cwnd = utcp->mtu;
+		debug_cwnd(c);
+
 		buffer_copy(&c->sndbuf, pkt->data, 0, len);
 		print_packet(c->utcp, "rtrx", pkt, sizeof(pkt->hdr) + len);
 		utcp->send(utcp, pkt, sizeof(pkt->hdr) + len);
@@ -1332,11 +1347,19 @@ synack:
 		c->snd.una = hdr.ack;
 
 		c->dupack = 0;
-		c->snd.cwnd += utcp->mtu;
+
+		// Increase the congestion window according to RFC 5681
+		if(c->snd.cwnd < c->snd.ssthresh) {
+			c->snd.cwnd += min(advanced, utcp->mtu); // eq. 2
+		} else {
+			c->snd.cwnd += max(1, (utcp->mtu * utcp->mtu) / c->snd.cwnd); // eq. 3
+		}
 
 		if(c->snd.cwnd > c->sndbuf.maxsize) {
 			c->snd.cwnd = c->sndbuf.maxsize;
 		}
+
+		debug_cwnd(c);
 
 		// Check if we have sent a FIN that is now ACKed.
 		switch(c->state) {
@@ -1370,6 +1393,7 @@ synack:
 				//Reset the congestion window so we wait for ACKs.
 				c->snd.nxt = c->snd.una;
 				c->snd.cwnd = utcp->mtu;
+				debug_cwnd(c);
 				start_retransmit_timer(c);
 			}
 		}

@@ -125,6 +125,7 @@ struct utcp_connection {
 
 		uint32_t last;
 		uint32_t cwnd;
+		uint32_t ssthresh;
 	} snd;
 
 	struct {
