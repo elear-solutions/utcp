@@ -1454,7 +1454,7 @@ synack:
 
 				// RFC 5681 fast recovery
 				c->snd.ssthresh = max(c->snd.cwnd / 2, utcp->mtu * 2); // eq. 4
-				c->snd.cwnd = max(c->snd.ssthresh + 3 * utcp->mtu, c->sndbuf.maxsize);
+				c->snd.cwnd = min(c->snd.ssthresh + 3 * utcp->mtu, c->sndbuf.maxsize);
 
 				if(c->snd.cwnd > c->sndbuf.maxsize) {
 					c->snd.cwnd = c->sndbuf.maxsize;
