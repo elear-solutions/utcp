@@ -1,0 +1,76 @@
+#!/bin/sh
+set -e
+
+LOG_PREFIX=/dev/shm/benchmark-log
+
+PLOT_SCRIPT=$LOG_PREFIX-plot.script
+PLOT_PDF=$LOG_PREFIX-plot.pdf
+
+cat >$PLOT_SCRIPT <<EOF
+	set terminal pdf size 29.7cm,21cm
+	set output "$PLOT_PDF"
+	set style data steps
+	set xdata time
+	set timefmt "%s"
+	set grid
+	set lmargin 12
+	set rmargin 3
+EOF
+
+for peer in client server; do
+	LOG=$LOG_PREFIX-$peer.txt
+	fgrep 'recv:' $LOG > $LOG.recv
+	grep '\(send\|rtrx\):' $LOG > $LOG.send
+	fgrep 'snd.cwnd' $LOG > $LOG.cwnd
+	fgrep 'cwndleft' $LOG > $LOG.left
+	fgrep 'rtt' $LOG > $LOG.rtt || (
+		head -1 $LOG.send | (read ts conn rest; echo $ts $conn rtt 0 srtt 0 rttvar 0 rto 0 >$LOG.rtt)
+	)
+	(fgrep 'fast recovery started' $LOG || true) | while read ts rest; do
+		echo "set xtics add (\"\" $ts)" >>$PLOT_SCRIPT
+	done
+	(fgrep 'retransmitting after timeout' $LOG || true) | while read ts rest; do
+		echo "set xtics add (\"\" $ts)" >>$PLOT_SCRIPT
+	done
+
+	cat >>$PLOT_SCRIPT <<EOF
+		set multiplot layout 4, 1 title "UTCP $peer"
+
+		set tmargin 2
+		set bmargin 0
+		set xtics format ""
+		set ylabel "sequence number (bytes)"
+		plot \
+			"$LOG.send" using 1:11 title "send seq", \
+			"$LOG.recv" using 1:13 title "recv ack"
+		set xrange [GPVAL_X_MIN:GPVAL_X_MAX]
+
+		set tmargin 0
+		set ylabel "size (bytes)"
+		plot \
+			"$LOG.cwnd" using 1:4 title "cwnd", \
+			"$LOG.cwnd" using 1:6 title "ssthresh"
+
+		set ylabel "time (milliseconds)"
+		plot \
+			"$LOG.rtt" using 1:(\$4/1000) title "rtt", \
+			"$LOG.rtt" using 1:(\$10/1000) title "rto"
+
+		set bmargin 4
+		set xtics format "%g"
+		set xlabel "time"
+		set ylabel "size (bytes)"
+		plot \
+			"$LOG.left" using 1:(\$4 > 0 ? \$4 : 0) title "cwnd left", \
+			"$LOG.left" using 1:6 title "sndbuf left"
+
+		unset xtics
+EOF
+done
+
+cat >>$PLOT_SCRIPT <<EOF
+	unset multiplot
+	set output
+EOF
+
+gnuplot $PLOT_SCRIPT
