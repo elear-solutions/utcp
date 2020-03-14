@@ -6,12 +6,16 @@ LOG_PREFIX=/dev/shm/benchmark-log
 SIZE=10000000
 RATE=100mbit
 DELAY=10ms
-JITTER=0ms
+JITTER=1ms
+LOSS=0.1%
 
 # Require root permissions
 if [ "$USER" != "root" ]; then
 	exec sudo "$0" "$@"
 fi
+
+# Remove old log files
+rm -f $LOG_PREFIX-* 2>/dev/null
 
 # Clean up old namespaces
 ip link del utcp-left 2>/dev/null || true
@@ -30,7 +34,7 @@ ip netns exec utcp-left ip addr add dev utcp-left 192.168.1.1/24
 ip netns exec utcp-left ip link set utcp-left up
 
 #ip netns exec utcp-left tc qdisc del dev utcp-left root
-ip netns exec utcp-left tc qdisc add dev utcp-left root netem rate $RATE delay $DELAY $JITTER
+ip netns exec utcp-left tc qdisc add dev utcp-left root netem rate $RATE delay $DELAY $JITTER loss random $LOSS
 
 # Set up the right namespace
 ip netns add utcp-right
@@ -42,8 +46,7 @@ ip netns exec utcp-right ip addr add dev utcp-right 192.168.1.2/24
 ip netns exec utcp-right ip link set utcp-right up
 
 #ip netns exec utcp-right tc qdisc del dev utcp-right root
-ip netns exec utcp-right tc qdisc add dev utcp-right root netem rate $RATE delay $DELAY $JITTER
-
+ip netns exec utcp-right tc qdisc add dev utcp-right root netem rate $RATE delay $DELAY $JITTER loss random $LOSS
 # Test using kernel TCP
 ip netns exec utcp-right tcpdump -i utcp-right -w $LOG_PREFIX-socat.pcap port 9999 2>/dev/null &
 ip netns exec utcp-left socat TCP4-LISTEN:9999 - >/dev/null &
