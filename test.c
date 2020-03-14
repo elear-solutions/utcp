@@ -32,6 +32,7 @@ long total_out;
 long total_in;
 FILE *reference;
 long mtu = 0;
+long bufsize;
 
 char *reorder_data;
 size_t reorder_len;
@@ -94,6 +95,12 @@ void do_accept(struct utcp_connection *nc, uint16_t port) {
 	(void)port;
 	utcp_accept(nc, do_recv, NULL);
 	c = nc;
+
+	if(bufsize) {
+		utcp_set_sndbuf(c, bufsize);
+		utcp_set_rcvbuf(c, bufsize);
+	}
+
 	utcp_set_accept_cb(c->utcp, NULL, NULL);
 }
 
@@ -205,6 +212,10 @@ int main(int argc, char *argv[]) {
 		mtu = atoi(getenv("MTU"));
 	}
 
+	if(getenv("BUFSIZE")) {
+		bufsize = atoi(getenv("BUFSIZE"));
+	}
+
 	char *reference_filename = getenv("REFERENCE");
 
 	if(reference_filename) {
@@ -267,6 +278,11 @@ int main(int argc, char *argv[]) {
 	if(!server) {
 		set_mtu(u, s);
 		c = utcp_connect_ex(u, 1, do_recv, NULL, flags);
+
+		if(bufsize) {
+			utcp_set_sndbuf(c, bufsize);
+			utcp_set_rcvbuf(c, bufsize);
+		}
 	}
 
 	struct pollfd fds[2] = {
