@@ -17,26 +17,25 @@
 #define DIR_READ 1
 #define DIR_WRITE 2
 
-struct utcp_connection *c;
-int dir = DIR_READ | DIR_WRITE;
-bool running = true;
-long inpktno;
-long outpktno;
-long dropfrom;
-long dropto;
-double reorder;
-long reorder_dist = 10;
-double dropin;
-double dropout;
-long total_out;
-long total_in;
-FILE *reference;
-long mtu = 0;
-long bufsize;
+static struct utcp_connection *c;
+static int dir = DIR_READ | DIR_WRITE;
+static long inpktno;
+static long outpktno;
+static long dropfrom;
+static long dropto;
+static double reorder;
+static long reorder_dist = 10;
+static double dropin;
+static double dropout;
+static long total_out;
+static long total_in;
+static FILE *reference;
+static long mtu;
+static long bufsize;
 
-char *reorder_data;
-size_t reorder_len;
-int reorder_countdown;
+static char *reorder_data;
+static size_t reorder_len;
+static int reorder_countdown;
 
 #if UTCP_DEBUG
 static void debug(const char *format, ...) {
@@ -59,7 +58,7 @@ static void debug(const char *format, ...) {
 #define debug(...) do {} while(0)
 #endif
 
-ssize_t do_recv(struct utcp_connection *c, const void *data, size_t len) {
+static ssize_t do_recv(struct utcp_connection *c, const void *data, size_t len) {
 	(void)c;
 
 	if(!data || !len) {
@@ -91,7 +90,7 @@ ssize_t do_recv(struct utcp_connection *c, const void *data, size_t len) {
 	return write(1, data, len);
 }
 
-void do_accept(struct utcp_connection *nc, uint16_t port) {
+static void do_accept(struct utcp_connection *nc, uint16_t port) {
 	(void)port;
 	utcp_accept(nc, do_recv, NULL);
 	c = nc;
@@ -104,7 +103,7 @@ void do_accept(struct utcp_connection *nc, uint16_t port) {
 	utcp_set_accept_cb(c->utcp, NULL, NULL);
 }
 
-ssize_t do_send(struct utcp *utcp, const void *data, size_t len) {
+static ssize_t do_send(struct utcp *utcp, const void *data, size_t len) {
 	int s = *(int *)utcp->priv;
 	outpktno++;
 
