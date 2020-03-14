@@ -38,14 +38,21 @@ size_t reorder_len;
 int reorder_countdown;
 
 #if UTCP_DEBUG
-void debug(const char *format, ...) {
-	struct timeval now;
-	gettimeofday(&now, NULL);
-	fprintf(stderr, "%lu.%lu ", now.tv_sec, now.tv_usec / 1000);
+static void debug(const char *format, ...) {
+	struct timespec tv;
+	char buf[1024];
+	int len;
+
+	clock_gettime(CLOCK_REALTIME, &tv);
+	len = snprintf(buf, sizeof(buf), "%ld.%06lu ", (long)tv.tv_sec, tv.tv_nsec / 1000);
 	va_list ap;
 	va_start(ap, format);
-	vfprintf(stderr, format, ap);
+	len += vsnprintf(buf + len, sizeof(buf) - len, format, ap);
 	va_end(ap);
+
+	if(len > 0 && (size_t)len < sizeof(buf)) {
+		fwrite(buf, len, 1, stderr);
+	}
 }
 #else
 #define debug(...) do {} while(0)
@@ -144,7 +151,7 @@ static void set_mtu(struct utcp *u, int s) {
 		mtu = 1500;
 	}
 
-	fprintf(stderr, "Using MTU %lu\n", mtu);
+	debug("Using MTU %lu\n", mtu);
 
 	utcp_set_mtu(u, mtu ? mtu - 48 : 1300);
 }
@@ -294,8 +301,8 @@ int main(int argc, char *argv[]) {
 
 		if(fds[0].revents) {
 			fds[0].revents = 0;
-			debug("stdin\n");
 			ssize_t len = read(0, buf, max);
+			debug("stdin %zd\n", len);
 
 			if(len <= 0) {
 				fds[0].fd = -1;
@@ -323,10 +330,10 @@ int main(int argc, char *argv[]) {
 
 		if(fds[1].revents) {
 			fds[1].revents = 0;
-			debug("netin\n");
 			struct sockaddr_storage ss;
 			socklen_t sl = sizeof(ss);
 			int len = recvfrom(s, buf, sizeof(buf), MSG_DONTWAIT, (struct sockaddr *)&ss, &sl);
+			debug("netin %zu\n", len);
 
 			if(len <= 0) {
 				debug("Error receiving UDP packet: %s\n", strerror(errno));
