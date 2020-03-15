@@ -4,10 +4,20 @@ set -e
 # Configuration
 LOG_PREFIX=/dev/shm/benchmark-log
 SIZE=10000000
+
+# Network parameters
+# Some realistic values:
+# - Gbit LAN connection: RATE=1gbit DELAY=0.4ms JITTER=0.04ms LOSS=0%
+# - Fast WAN connection: RATE=100mbit DELAY=50ms JITTER=3ms LOSS=0%
+# - 5GHz WiFi connection: RATE=90mbit DELAY=5ms JITTER=1ms LOSS=0%
 RATE=100mbit
 DELAY=10ms
 JITTER=1ms
 LOSS=0.1%
+
+# Maximum achievable bandwidth is limited to BUFSIZE / (2 * DELAY)
+# The Linux kernel has a default maximum send buffer of 4 MiB
+#export BUFSIZE=4194304
 
 # Require root permissions
 if [ "$USER" != "root" ]; then
@@ -69,7 +79,7 @@ tail -2 $LOG_PREFIX-socat-client.txt
 
 echo
 echo "UTCP:"
-tail -2 $LOG_PREFIX-client.txt
+tail -3 $LOG_PREFIX-client.txt
 
 # If sudo was used, ensure the log files can be read by the user
 if [ -n "$SUDO_USER" ]; then

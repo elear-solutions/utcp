@@ -57,8 +57,8 @@ for peer in client server; do
 			"$LOG.rtt" using 1:(\$10/1000) title "rto"
 
 		set bmargin 4
-		set xtics format "%g"
-		set xlabel "time"
+		set xtics format "%.3S"
+		set xlabel "time (seconds)"
 		set ylabel "size (bytes)"
 		plot \
 			"$LOG.left" using 1:(\$4 > 0 ? \$4 : 0) title "cwnd left", \
