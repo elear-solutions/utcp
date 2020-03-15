@@ -808,27 +808,24 @@ static void retransmit(struct utcp_connection *c) {
 		pkt->hdr.seq = c->snd.una;
 		pkt->hdr.ack = c->rcv.nxt;
 		pkt->hdr.ctl = ACK;
-		uint32_t len = seqdiff(c->snd.last, c->snd.una);
-
-		if(len > utcp->mtu) {
-			len = utcp->mtu;
-		}
+		uint32_t len = min(seqdiff(c->snd.last, c->snd.una), utcp->mtu);
 
 		if(fin_wanted(c, c->snd.una + len)) {
 			len--;
 			pkt->hdr.ctl |= FIN;
 		}
 
-		c->snd.nxt = c->snd.una + len;
-
 		// RFC 5681 slow start after timeout
-		c->snd.ssthresh = max(c->snd.cwnd / 2, utcp->mtu * 2); // eq. 4
+		uint32_t flightsize = seqdiff(c->snd.nxt, c->snd.una);
+		c->snd.ssthresh = max(flightsize / 2, utcp->mtu * 2); // eq. 4
 		c->snd.cwnd = utcp->mtu;
 		debug_cwnd(c);
 
 		buffer_copy(&c->sndbuf, pkt->data, 0, len);
 		print_packet(c, "rtrx", pkt, sizeof(pkt->hdr) + len);
 		utcp->send(utcp, pkt, sizeof(pkt->hdr) + len);
+
+		c->snd.nxt = c->snd.una + len;
 		break;
 
 	case CLOSED:
@@ -1467,7 +1464,8 @@ synack:
 			if(c->dupack == 3) {
 				// RFC 5681 fast recovery
 				debug(c, "fast recovery started\n", c->dupack);
-				c->snd.ssthresh = max(c->snd.cwnd / 2, utcp->mtu * 2); // eq. 4
+				uint32_t flightsize = seqdiff(c->snd.nxt, c->snd.una);
+				c->snd.ssthresh = max(flightsize / 2, utcp->mtu * 2); // eq. 4
 				c->snd.cwnd = min(c->snd.ssthresh + 3 * utcp->mtu, c->sndbuf.maxsize);
 
 				if(c->snd.cwnd > c->sndbuf.maxsize) {
