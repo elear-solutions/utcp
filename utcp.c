@@ -128,7 +128,7 @@ static void print_packet(struct utcp_connection *c, const char *dir, const void 
 }
 
 static void debug_cwnd(struct utcp_connection *c) {
-	debug(c, "snd.cwnd %u snd.ssthresh %u\n", c->snd.cwnd, c->snd.ssthresh);
+	debug(c, "snd.cwnd %u snd.ssthresh %u\n", c->snd.cwnd, ~c->snd.ssthresh ? c->snd.ssthresh : 0);
 }
 #else
 #define debug(...) do {} while(0)
@@ -402,11 +402,7 @@ static struct utcp_connection *allocate_connection(struct utcp *utcp, uint16_t s
 	c->snd.nxt = c->snd.iss + 1;
 	c->snd.last = c->snd.nxt;
 	c->snd.cwnd = (utcp->mtu > 2190 ? 2 : utcp->mtu > 1095 ? 3 : 4) * utcp->mtu;
-#if UTCP_DEBUG
-	c->snd.ssthresh = c->sndbuf.maxsize;
-#else
 	c->snd.ssthresh = ~0;
-#endif
 	debug_cwnd(c);
 	c->utcp = utcp;
 
