@@ -848,6 +848,7 @@ static void retransmit(struct utcp_connection *c) {
 	}
 
 	c->rtt_start.tv_sec = 0; // invalidate RTT timer
+	c->dupack = 0; // cancel any ongoing fast recovery
 
 cleanup:
 	free(pkt);
@@ -1457,7 +1458,7 @@ synack:
 			break;
 		}
 	} else {
-		if(!len && is_reliable(c)) {
+		if(!len && is_reliable(c) && c->snd.una != c->snd.last) {
 			c->dupack++;
 			debug(c, "duplicate ACK %d\n", c->dupack);
 
@@ -1484,6 +1485,11 @@ synack:
 
 				debug_cwnd(c);
 			}
+
+			// We got an ACK which indicates the other side did get one of our packets.
+			// Reset the retransmission timer to avoid going to slow start,
+			// but don't touch the connection timeout.
+			start_retransmit_timer(c);
 		}
 	}
 
