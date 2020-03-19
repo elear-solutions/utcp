@@ -549,13 +549,7 @@ static void ack(struct utcp_connection *c, bool sendatleastone) {
 	struct {
 		struct hdr hdr;
 		uint8_t data[];
-	} *pkt;
-
-	pkt = malloc(c->utcp->mtu);
-
-	if(!pkt) {
-		return;
-	}
+	} *pkt = c->utcp->pkt;
 
 	pkt->hdr.src = c->src;
 	pkt->hdr.dst = c->dst;
@@ -588,8 +582,6 @@ static void ack(struct utcp_connection *c, bool sendatleastone) {
 		print_packet(c, "send", pkt, sizeof(pkt->hdr) + seglen);
 		c->utcp->send(c->utcp, pkt, sizeof(pkt->hdr) + seglen);
 	} while(left);
-
-	free(pkt);
 }
 
 ssize_t utcp_send(struct utcp_connection *c, const void *data, size_t len) {
@@ -762,13 +754,7 @@ static void retransmit(struct utcp_connection *c) {
 	struct {
 		struct hdr hdr;
 		uint8_t data[];
-	} *pkt;
-
-	pkt = malloc(c->utcp->mtu);
-
-	if(!pkt) {
-		return;
-	}
+	} *pkt = c->utcp->pkt;
 
 	pkt->hdr.src = c->src;
 	pkt->hdr.dst = c->dst;
@@ -851,7 +837,7 @@ static void retransmit(struct utcp_connection *c) {
 	c->dupack = 0; // cancel any ongoing fast recovery
 
 cleanup:
-	free(pkt);
+	return;
 }
 
 /* Update receive buffer and SACK entries after consuming data.
@@ -1991,8 +1977,7 @@ struct utcp *utcp_init(utcp_accept_t accept, utcp_pre_accept_t pre_accept, utcp_
 	utcp->pre_accept = pre_accept;
 	utcp->send = send;
 	utcp->priv = priv;
-	utcp->mtu = DEFAULT_MTU;
-	utcp->mss = DEFAULT_MTU - sizeof(struct hdr);
+	utcp_set_mtu(utcp, DEFAULT_MTU);
 	utcp->timeout = DEFAULT_USER_TIMEOUT; // sec
 	utcp->rto = START_RTO; // usec
 
@@ -2031,11 +2016,23 @@ uint16_t utcp_get_mtu(struct utcp *utcp) {
 }
 
 void utcp_set_mtu(struct utcp *utcp, uint16_t mtu) {
-	// TODO: handle overhead of the header
-	if(utcp) {
-		utcp->mtu = mtu;
-		utcp->mss = mtu - sizeof(struct hdr);
+	if (!utcp) {
+		return;
 	}
+
+	if (mtu <= sizeof(struct hdr)) {
+		return;
+	}
+
+	if (mtu > utcp->mtu) {
+		char *new = realloc(utcp->pkt, mtu);
+		if (!new)
+			return;
+		utcp->pkt = new;
+	}
+
+	utcp->mtu = mtu;
+	utcp->mss = mtu - sizeof(struct hdr);
 }
 
 void utcp_reset_timers(struct utcp *utcp) {

@@ -169,6 +169,10 @@ struct utcp {
 	utcp_pre_accept_t pre_accept;
 	utcp_send_t send;
 
+	// Packet buffer
+
+	void *pkt;
+
 	// Global socket options
 
 	uint16_t mtu; // The maximum size of a UTCP packet, including headers.
