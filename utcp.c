@@ -171,12 +171,40 @@ static int32_t seqdiff(uint32_t a, uint32_t b) {
 }
 
 // Buffer functions
-// TODO: convert to ringbuffers to avoid memmove() operations.
+static bool buffer_wraps(struct buffer *buf) {
+	return buf->size - buf->offset < buf->used;
+}
+
+static bool buffer_resize(struct buffer *buf, uint32_t newsize) {
+	char *newdata = realloc(buf->data, newsize);
+
+	if(!newdata) {
+		return false;
+	}
+
+	buf->data = newdata;
+
+	if(buffer_wraps(buf)) {
+		// Shift the right part of the buffer until it hits the end of the new buffer.
+		// Old situation:
+		// [345......012]
+		// New situation:
+		// [345.........|........012]
+		uint32_t tailsize = buf->size - buf->offset;
+		uint32_t newoffset = newsize - tailsize;
+		memmove(buf + newoffset, buf + buf->offset, tailsize);
+		buf->offset = newoffset;
+	}
+
+	buf->size = newsize;
+	return true;
+}
 
 // Store data into the buffer
 static ssize_t buffer_put_at(struct buffer *buf, size_t offset, const void *data, size_t len) {
 	debug(NULL, "buffer_put_at %lu %lu %lu\n", (unsigned long)buf->used, (unsigned long)offset, (unsigned long)len);
 
+	// Ensure we don't store more than maxsize bytes in total
 	size_t required = offset + len;
 
 	if(required > buf->maxsize) {
@@ -188,32 +216,41 @@ static ssize_t buffer_put_at(struct buffer *buf, size_t offset, const void *data
 		required = buf->maxsize;
 	}
 
+	// Check if we need to resize the buffer
 	if(required > buf->size) {
 		size_t newsize = buf->size;
 
 		if(!newsize) {
-			newsize = required;
-		} else {
-			do {
-				newsize *= 2;
-			} while(newsize < required);
+			newsize = 4096;
 		}
+
+		do {
+			newsize *= 2;
+		} while(newsize < required);
 
 		if(newsize > buf->maxsize) {
 			newsize = buf->maxsize;
 		}
 
-		char *newdata = realloc(buf->data, newsize);
-
-		if(!newdata) {
+		if(!buffer_resize(buf, newsize)) {
 			return -1;
 		}
-
-		buf->data = newdata;
-		buf->size = newsize;
 	}
 
-	memcpy(buf->data + offset, data, len);
+	uint32_t realoffset = buf->offset + offset;
+
+	if(buf->size - buf->offset < offset) {
+		// The offset wrapped
+		realoffset -= buf->size;
+	}
+
+	if(buf->size - realoffset < len) {
+		// The new chunk of data must be wrapped
+		memcpy(buf->data + realoffset, data, buf->size - realoffset);
+		memcpy(buf->data, (char *)data + buf->size - realoffset, len - (buf->size - realoffset));
+	} else {
+		memcpy(buf->data + realoffset, data, len);
+	}
 
 	if(required > buf->used) {
 		buf->used = required;
@@ -226,52 +263,59 @@ static ssize_t buffer_put(struct buffer *buf, const void *data, size_t len) {
 	return buffer_put_at(buf, buf->used, data, len);
 }
 
-// Get data from the buffer. data can be NULL.
-static ssize_t buffer_get(struct buffer *buf, void *data, size_t len) {
-	if(len > buf->used) {
-		len = buf->used;
-	}
-
-	if(data) {
-		memcpy(data, buf->data, len);
-	}
-
-	if(len < buf->used) {
-		memmove(buf->data, buf->data + len, buf->used - len);
-	}
-
-	buf->used -= len;
-	return len;
-}
-
 // Copy data from the buffer without removing it.
 static ssize_t buffer_copy(struct buffer *buf, void *data, size_t offset, size_t len) {
+	// Ensure we don't copy more than is actually stored in the buffer
 	if(offset >= buf->used) {
 		return 0;
 	}
 
-	if(offset + len > buf->used) {
+	if(buf->used - offset < len) {
 		len = buf->used - offset;
 	}
 
-	memcpy(data, buf->data + offset, len);
+	uint32_t realoffset = buf->offset + offset;
+
+	if(buf->size - buf->offset < offset) {
+		// The offset wrapped
+		realoffset -= buf->size;
+	}
+
+	if(buf->size - realoffset < len) {
+		// The data is wrapped
+		memcpy(data, buf->data + realoffset, buf->size - realoffset);
+		memcpy((char *)data + buf->size - realoffset, buf->data, len - (buf->size - realoffset));
+	} else {
+		memcpy(data, buf->data + realoffset, len);
+	}
+
 	return len;
 }
 
-static bool buffer_init(struct buffer *buf, uint32_t len, uint32_t maxlen) {
-	memset(buf, 0, sizeof(*buf));
-
-	if(len) {
-		buf->data = malloc(len);
-
-		if(!buf->data) {
-			return false;
-		}
+// Discard data from the buffer.
+static ssize_t buffer_discard(struct buffer *buf, size_t len) {
+	if(buf->used < len) {
+		len = buf->used;
 	}
 
-	buf->size = len;
-	buf->maxsize = maxlen;
-	return true;
+	if(buf->size - buf->offset < len) {
+		buf->offset -= buf->size;
+	}
+
+	buf->offset += len;
+	buf->used -= len;
+
+	return len;
+}
+
+static bool buffer_set_size(struct buffer *buf, uint32_t minsize, uint32_t maxsize) {
+	if(maxsize < minsize) {
+		maxsize = minsize;
+	}
+
+	buf->maxsize = maxsize;
+
+	return buf->size >= minsize || buffer_resize(buf, minsize);
 }
 
 static void buffer_exit(struct buffer *buf) {
@@ -378,12 +422,12 @@ static struct utcp_connection *allocate_connection(struct utcp *utcp, uint16_t s
 		return NULL;
 	}
 
-	if(!buffer_init(&c->sndbuf, DEFAULT_SNDBUFSIZE, DEFAULT_MAXSNDBUFSIZE)) {
+	if(!buffer_set_size(&c->sndbuf, DEFAULT_SNDBUFSIZE, DEFAULT_MAXSNDBUFSIZE)) {
 		free(c);
 		return NULL;
 	}
 
-	if(!buffer_init(&c->rcvbuf, DEFAULT_RCVBUFSIZE, DEFAULT_MAXRCVBUFSIZE)) {
+	if(!buffer_set_size(&c->rcvbuf, DEFAULT_RCVBUFSIZE, DEFAULT_MAXRCVBUFSIZE)) {
 		buffer_exit(&c->sndbuf);
 		free(c);
 		return NULL;
@@ -668,7 +712,7 @@ ssize_t utcp_send(struct utcp_connection *c, const void *data, size_t len) {
 
 	if(!is_reliable(c)) {
 		c->snd.una = c->snd.nxt = c->snd.last;
-		buffer_get(&c->sndbuf, NULL, c->sndbuf.used);
+		buffer_discard(&c->sndbuf, c->sndbuf.used);
 	}
 
 	if(is_reliable(c) && !timerisset(&c->rtrx_timeout)) {
@@ -867,7 +911,7 @@ static void sack_consume(struct utcp_connection *c, size_t len) {
 		return;
 	}
 
-	buffer_get(&c->rcvbuf, NULL, len);
+	buffer_discard(&c->rcvbuf, len);
 
 	for(int i = 0; i < NSACKS && c->sacks[i].len;) {
 		if(len < c->sacks[i].offset) {
@@ -1403,7 +1447,7 @@ synack:
 #endif
 
 		if(data_acked) {
-			buffer_get(&c->sndbuf, NULL, data_acked);
+			buffer_discard(&c->sndbuf, data_acked);
 		}
 
 		// Also advance snd.nxt if possible
@@ -2016,18 +2060,21 @@ uint16_t utcp_get_mtu(struct utcp *utcp) {
 }
 
 void utcp_set_mtu(struct utcp *utcp, uint16_t mtu) {
-	if (!utcp) {
+	if(!utcp) {
 		return;
 	}
 
-	if (mtu <= sizeof(struct hdr)) {
+	if(mtu <= sizeof(struct hdr)) {
 		return;
 	}
 
-	if (mtu > utcp->mtu) {
-		char *new = realloc(utcp->pkt, mtu);
-		if (!new)
+	if(mtu > utcp->mtu) {
+		char *new = realloc(utcp->pkt, mtu + sizeof(struct hdr));
+
+		if(!new) {
 			return;
+		}
+
 		utcp->pkt = new;
 	}
 
