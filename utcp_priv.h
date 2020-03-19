@@ -171,7 +171,8 @@ struct utcp {
 
 	// Global socket options
 
-	uint16_t mtu;
+	uint16_t mtu; // The maximum size of a UTCP packet, including headers.
+	uint16_t mss; // The maximum size of the payload of a UTCP packet.
 	int timeout; // sec
 
 	// RTT variables

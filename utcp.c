@@ -401,7 +401,7 @@ static struct utcp_connection *allocate_connection(struct utcp *utcp, uint16_t s
 	c->snd.una = c->snd.iss;
 	c->snd.nxt = c->snd.iss + 1;
 	c->snd.last = c->snd.nxt;
-	c->snd.cwnd = (utcp->mtu > 2190 ? 2 : utcp->mtu > 1095 ? 3 : 4) * utcp->mtu;
+	c->snd.cwnd = (utcp->mss > 2190 ? 2 : utcp->mss > 1095 ? 3 : 4) * utcp->mss;
 	c->snd.ssthresh = ~0;
 	debug_cwnd(c);
 	c->utcp = utcp;
@@ -535,8 +535,8 @@ static void ack(struct utcp_connection *c, bool sendatleastone) {
 	} else if(cwndleft < left) {
 		left = cwndleft;
 
-		if(!sendatleastone || cwndleft > c->utcp->mtu) {
-			left -= left % c->utcp->mtu;
+		if(!sendatleastone || cwndleft > c->utcp->mss) {
+			left -= left % c->utcp->mss;
 		}
 	}
 
@@ -551,7 +551,7 @@ static void ack(struct utcp_connection *c, bool sendatleastone) {
 		uint8_t data[];
 	} *pkt;
 
-	pkt = malloc(sizeof(pkt->hdr) + c->utcp->mtu);
+	pkt = malloc(c->utcp->mtu);
 
 	if(!pkt) {
 		return;
@@ -565,7 +565,7 @@ static void ack(struct utcp_connection *c, bool sendatleastone) {
 	pkt->hdr.aux = 0;
 
 	do {
-		uint32_t seglen = left > c->utcp->mtu ? c->utcp->mtu : left;
+		uint32_t seglen = left > c->utcp->mss ? c->utcp->mss : left;
 		pkt->hdr.seq = c->snd.nxt;
 
 		buffer_copy(&c->sndbuf, pkt->data, seqdiff(c->snd.nxt, c->snd.una), seglen);
@@ -710,7 +710,7 @@ static void fast_retransmit(struct utcp_connection *c) {
 		uint8_t data[];
 	} *pkt;
 
-	pkt = malloc(sizeof(pkt->hdr) + c->utcp->mtu);
+	pkt = malloc(c->utcp->mtu);
 
 	if(!pkt) {
 		return;
@@ -731,7 +731,7 @@ static void fast_retransmit(struct utcp_connection *c) {
 		pkt->hdr.seq = c->snd.una;
 		pkt->hdr.ack = c->rcv.nxt;
 		pkt->hdr.ctl = ACK;
-		uint32_t len = min(seqdiff(c->snd.last, c->snd.una), utcp->mtu);
+		uint32_t len = min(seqdiff(c->snd.last, c->snd.una), utcp->mss);
 
 		if(fin_wanted(c, c->snd.una + len)) {
 			len--;
@@ -764,7 +764,7 @@ static void retransmit(struct utcp_connection *c) {
 		uint8_t data[];
 	} *pkt;
 
-	pkt = malloc(sizeof(pkt->hdr) + c->utcp->mtu);
+	pkt = malloc(c->utcp->mtu);
 
 	if(!pkt) {
 		return;
@@ -808,7 +808,7 @@ static void retransmit(struct utcp_connection *c) {
 		pkt->hdr.seq = c->snd.una;
 		pkt->hdr.ack = c->rcv.nxt;
 		pkt->hdr.ctl = ACK;
-		uint32_t len = min(seqdiff(c->snd.last, c->snd.una), utcp->mtu);
+		uint32_t len = min(seqdiff(c->snd.last, c->snd.una), utcp->mss);
 
 		if(fin_wanted(c, c->snd.una + len)) {
 			len--;
@@ -817,8 +817,8 @@ static void retransmit(struct utcp_connection *c) {
 
 		// RFC 5681 slow start after timeout
 		uint32_t flightsize = seqdiff(c->snd.nxt, c->snd.una);
-		c->snd.ssthresh = max(flightsize / 2, utcp->mtu * 2); // eq. 4
-		c->snd.cwnd = utcp->mtu;
+		c->snd.ssthresh = max(flightsize / 2, utcp->mss * 2); // eq. 4
+		c->snd.cwnd = utcp->mss;
 		debug_cwnd(c);
 
 		buffer_copy(&c->sndbuf, pkt->data, 0, len);
@@ -1425,9 +1425,9 @@ synack:
 
 		// Increase the congestion window according to RFC 5681
 		if(c->snd.cwnd < c->snd.ssthresh) {
-			c->snd.cwnd += min(advanced, utcp->mtu); // eq. 2
+			c->snd.cwnd += min(advanced, utcp->mss); // eq. 2
 		} else {
-			c->snd.cwnd += max(1, (utcp->mtu * utcp->mtu) / c->snd.cwnd); // eq. 3
+			c->snd.cwnd += max(1, (utcp->mss * utcp->mss) / c->snd.cwnd); // eq. 3
 		}
 
 		if(c->snd.cwnd > c->sndbuf.maxsize) {
@@ -1466,8 +1466,8 @@ synack:
 				// RFC 5681 fast recovery
 				debug(c, "fast recovery started\n", c->dupack);
 				uint32_t flightsize = seqdiff(c->snd.nxt, c->snd.una);
-				c->snd.ssthresh = max(flightsize / 2, utcp->mtu * 2); // eq. 4
-				c->snd.cwnd = min(c->snd.ssthresh + 3 * utcp->mtu, c->sndbuf.maxsize);
+				c->snd.ssthresh = max(flightsize / 2, utcp->mss * 2); // eq. 4
+				c->snd.cwnd = min(c->snd.ssthresh + 3 * utcp->mss, c->sndbuf.maxsize);
 
 				if(c->snd.cwnd > c->sndbuf.maxsize) {
 					c->snd.cwnd = c->sndbuf.maxsize;
@@ -1477,7 +1477,7 @@ synack:
 
 				fast_retransmit(c);
 			} else if(c->dupack > 3) {
-				c->snd.cwnd += utcp->mtu;
+				c->snd.cwnd += utcp->mss;
 
 				if(c->snd.cwnd > c->sndbuf.maxsize) {
 					c->snd.cwnd = c->sndbuf.maxsize;
@@ -1979,6 +1979,7 @@ struct utcp *utcp_init(utcp_accept_t accept, utcp_pre_accept_t pre_accept, utcp_
 	utcp->send = send;
 	utcp->priv = priv;
 	utcp->mtu = DEFAULT_MTU;
+	utcp->mss = DEFAULT_MTU - sizeof(struct hdr);
 	utcp->timeout = DEFAULT_USER_TIMEOUT; // sec
 	utcp->rto = START_RTO; // usec
 
@@ -2020,6 +2021,7 @@ void utcp_set_mtu(struct utcp *utcp, uint16_t mtu) {
 	// TODO: handle overhead of the header
 	if(utcp) {
 		utcp->mtu = mtu;
+		utcp->mss = mtu - sizeof(struct hdr);
 	}
 }
 

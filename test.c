@@ -159,7 +159,7 @@ static void set_mtu(struct utcp *u, int s) {
 
 	debug("Using MTU %lu\n", mtu);
 
-	utcp_set_mtu(u, mtu ? mtu - 48 : 1300);
+	utcp_set_mtu(u, mtu ? mtu - 28 : 1300);
 }
 
 int main(int argc, char *argv[]) {
