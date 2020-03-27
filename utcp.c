@@ -1252,6 +1252,19 @@ synack:
 			// Otherwise, continue processing.
 			len = 0;
 		}
+	} else {
+#if UTCP_DEBUG
+		int32_t rcv_offset = seqdiff(hdr.seq, c->rcv.nxt);
+
+		if(rcv_offset) {
+			debug(c, "packet out of order, offset %u bytes", rcv_offset);
+		}
+
+		if(rcv_offset >= 0) {
+			c->rcv.nxt = hdr.seq + len;
+		}
+
+#endif
 	}
 
 	c->snd.wnd = hdr.wnd; // TODO: move below
