@@ -291,7 +291,7 @@ int main(int argc, char *argv[]) {
 
 	char buf[102400];
 
-	struct timeval timeout = utcp_timeout(u);
+	struct timespec timeout = utcp_timeout(u);
 
 	while(!connected || utcp_is_active(u)) {
 		size_t max = c ? utcp_get_sndbuf_free(c) : 0;
@@ -304,7 +304,7 @@ int main(int argc, char *argv[]) {
 			max = read_size;
 		}
 
-		int timeout_ms = timeout.tv_sec * 1000 + timeout.tv_usec / 1000 + 1;
+		int timeout_ms = timeout.tv_sec * 1000 + timeout.tv_nsec / 1000000 + 1;
 
 		debug("polling, dir = %d, timeout = %d\n", dir, timeout_ms);
 

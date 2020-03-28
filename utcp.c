@@ -27,8 +27,6 @@
 #include <stdbool.h>
 #include <string.h>
 #include <unistd.h>
-#include <sys/time.h>
-#include <sys/socket.h>
 #include <time.h>
 
 #include "utcp_priv.h"
@@ -45,15 +43,37 @@
 #undef poll
 #endif
 
-#ifndef timersub
-#define timersub(a, b, r)\
-	do {\
-		(r)->tv_sec = (a)->tv_sec - (b)->tv_sec;\
-		(r)->tv_usec = (a)->tv_usec - (b)->tv_usec;\
-		if((r)->tv_usec < 0)\
-			(r)->tv_sec--, (r)->tv_usec += USEC_PER_SEC;\
-	} while (0)
-#endif
+static void timespec_sub(const struct timespec *a, const struct timespec *b, struct timespec *r) {
+	r->tv_sec = a->tv_sec - b->tv_sec;
+	r->tv_nsec = a->tv_nsec - b->tv_nsec;
+
+	if(r->tv_nsec < 0) {
+		r->tv_sec--, r->tv_nsec += NSEC_PER_SEC;
+	}
+}
+
+static int32_t timespec_diff_usec(const struct timespec *a, const struct timespec *b) {
+	int64_t diff = (a->tv_sec - b->tv_sec) * 1000000000 + a->tv_sec - b->tv_sec;
+	return diff / 1000;
+}
+
+static bool timespec_lt(const struct timespec *a, const struct timespec *b) {
+	if(a->tv_sec == b->tv_sec) {
+		return a->tv_nsec < b->tv_nsec;
+	} else {
+		return a->tv_sec < b->tv_sec;
+	}
+}
+
+static void timespec_clear(struct timespec *a) {
+	a->tv_sec = 0;
+}
+
+static bool timespec_isset(const struct timespec *a) {
+	return a->tv_sec;
+}
+
+static long CLOCK_GRANULARITY;
 
 static inline size_t min(size_t a, size_t b) {
 	return a < b ? a : b;
@@ -68,6 +88,14 @@ static inline size_t max(size_t a, size_t b) {
 
 #ifndef UTCP_DEBUG_DATALEN
 #define UTCP_DEBUG_DATALEN 20
+#endif
+
+#ifndef UTCP_CLOCK
+#if defined(CLOCK_MONOTONIC_RAW) && defined(__x86_64__)
+#define UTCP_CLOCK CLOCK_MONOTONIC_RAW
+#else
+#define UTCP_CLOCK CLOCK_MONOTONIC
+#endif
 #endif
 
 static void debug(struct utcp_connection *c, const char *format, ...) {
@@ -140,7 +168,7 @@ static void set_state(struct utcp_connection *c, enum state state) {
 	c->state = state;
 
 	if(state == ESTABLISHED) {
-		timerclear(&c->conn_timeout);
+		timespec_clear(&c->conn_timeout);
 	}
 
 	debug(c, "state %s\n", strstate[state]);
@@ -493,19 +521,27 @@ static void update_rtt(struct utcp_connection *c, uint32_t rtt) {
 }
 
 static void start_retransmit_timer(struct utcp_connection *c) {
-	gettimeofday(&c->rtrx_timeout, NULL);
-	c->rtrx_timeout.tv_usec += c->utcp->rto;
+	clock_gettime(UTCP_CLOCK, &c->rtrx_timeout);
 
-	while(c->rtrx_timeout.tv_usec >= 1000000) {
-		c->rtrx_timeout.tv_usec -= 1000000;
+	uint32_t rto = c->utcp->rto;
+
+	while(rto > USEC_PER_SEC) {
+		c->rtrx_timeout.tv_sec++;
+		rto -= USEC_PER_SEC;
+	}
+
+	c->rtrx_timeout.tv_nsec += c->utcp->rto * 1000;
+
+	if(c->rtrx_timeout.tv_nsec >= NSEC_PER_SEC) {
+		c->rtrx_timeout.tv_nsec -= NSEC_PER_SEC;
 		c->rtrx_timeout.tv_sec++;
 	}
 
-	debug(c, "rtrx_timeout %ld.%06lu\n", c->rtrx_timeout.tv_sec, c->rtrx_timeout.tv_usec);
+	debug(c, "rtrx_timeout %ld.%06lu\n", c->rtrx_timeout.tv_sec, c->rtrx_timeout.tv_nsec);
 }
 
 static void stop_retransmit_timer(struct utcp_connection *c) {
-	timerclear(&c->rtrx_timeout);
+	timespec_clear(&c->rtrx_timeout);
 	debug(c, "rtrx_timeout cleared\n");
 }
 
@@ -544,7 +580,7 @@ struct utcp_connection *utcp_connect_ex(struct utcp *utcp, uint16_t dst, utcp_re
 	print_packet(c, "send", &pkt, sizeof(pkt));
 	utcp->send(utcp, &pkt, sizeof(pkt));
 
-	gettimeofday(&c->conn_timeout, NULL);
+	clock_gettime(UTCP_CLOCK, &c->conn_timeout);
 	c->conn_timeout.tv_sec += utcp->timeout;
 
 	start_retransmit_timer(c);
@@ -618,7 +654,7 @@ static void ack(struct utcp_connection *c, bool sendatleastone) {
 
 		if(!c->rtt_start.tv_sec) {
 			// Start RTT measurement
-			gettimeofday(&c->rtt_start, NULL);
+			clock_gettime(UTCP_CLOCK, &c->rtt_start);
 			c->rtt_seq = pkt->hdr.seq + seglen;
 			debug(c, "starting RTT measurement, expecting ack %u\n", c->rtt_seq);
 		}
@@ -715,12 +751,12 @@ ssize_t utcp_send(struct utcp_connection *c, const void *data, size_t len) {
 		buffer_discard(&c->sndbuf, c->sndbuf.used);
 	}
 
-	if(is_reliable(c) && !timerisset(&c->rtrx_timeout)) {
+	if(is_reliable(c) && !timespec_isset(&c->rtrx_timeout)) {
 		start_retransmit_timer(c);
 	}
 
-	if(is_reliable(c) && !timerisset(&c->conn_timeout)) {
-		gettimeofday(&c->conn_timeout, NULL);
+	if(is_reliable(c) && !timespec_isset(&c->conn_timeout)) {
+		clock_gettime(UTCP_CLOCK, &c->conn_timeout);
 		c->conn_timeout.tv_sec += c->utcp->timeout;
 	}
 
@@ -1415,10 +1451,10 @@ synack:
 		// RTT measurement
 		if(c->rtt_start.tv_sec) {
 			if(c->rtt_seq == hdr.ack) {
-				struct timeval now, diff;
-				gettimeofday(&now, NULL);
-				timersub(&now, &c->rtt_start, &diff);
-				update_rtt(c, diff.tv_sec * 1000000 + diff.tv_usec);
+				struct timespec now;
+				clock_gettime(UTCP_CLOCK, &now);
+				int32_t diff = timespec_diff_usec(&now, &c->rtt_start);
+				update_rtt(c, diff);
 				c->rtt_start.tv_sec = 0;
 			} else if(c->rtt_seq < hdr.ack) {
 				debug(c, "cancelling RTT measurement: %u < %u\n", c->rtt_seq, hdr.ack);
@@ -1490,7 +1526,7 @@ synack:
 
 		case CLOSING:
 			if(c->snd.una == c->snd.last) {
-				gettimeofday(&c->conn_timeout, NULL);
+				clock_gettime(UTCP_CLOCK, &c->conn_timeout);
 				c->conn_timeout.tv_sec += utcp->timeout;
 				set_state(c, TIME_WAIT);
 			}
@@ -1541,10 +1577,10 @@ synack:
 	if(advanced) {
 		if(c->snd.una == c->snd.last) {
 			stop_retransmit_timer(c);
-			timerclear(&c->conn_timeout);
+			timespec_clear(&c->conn_timeout);
 		} else if(is_reliable(c)) {
 			start_retransmit_timer(c);
-			gettimeofday(&c->conn_timeout, NULL);
+			clock_gettime(UTCP_CLOCK, &c->conn_timeout);
 			c->conn_timeout.tv_sec += utcp->timeout;
 		}
 	}
@@ -1672,7 +1708,7 @@ skip_ack:
 			break;
 
 		case FIN_WAIT_2:
-			gettimeofday(&c->conn_timeout, NULL);
+			clock_gettime(UTCP_CLOCK, &c->conn_timeout);
 			c->conn_timeout.tv_sec += utcp->timeout;
 			set_state(c, TIME_WAIT);
 			break;
@@ -1803,7 +1839,7 @@ int utcp_shutdown(struct utcp_connection *c, int dir) {
 
 	ack(c, false);
 
-	if(!timerisset(&c->rtrx_timeout)) {
+	if(!timespec_isset(&c->rtrx_timeout)) {
 		start_retransmit_timer(c);
 	}
 
@@ -1921,10 +1957,10 @@ int utcp_abort(struct utcp_connection *c) {
  * The return value is the time to the next timeout in milliseconds,
  * or maybe a negative value if the timeout is infinite.
  */
-struct timeval utcp_timeout(struct utcp *utcp) {
-	struct timeval now;
-	gettimeofday(&now, NULL);
-	struct timeval next = {now.tv_sec + 3600, now.tv_usec};
+struct timespec utcp_timeout(struct utcp *utcp) {
+	struct timespec now;
+	clock_gettime(UTCP_CLOCK, &now);
+	struct timespec next = {now.tv_sec + 3600, now.tv_nsec};
 
 	for(int i = 0; i < utcp->nconnections; i++) {
 		struct utcp_connection *c = utcp->connections[i];
@@ -1944,7 +1980,7 @@ struct timeval utcp_timeout(struct utcp *utcp) {
 			continue;
 		}
 
-		if(timerisset(&c->conn_timeout) && timercmp(&c->conn_timeout, &now, <)) {
+		if(timespec_isset(&c->conn_timeout) && timespec_lt(&c->conn_timeout, &now)) {
 			errno = ETIMEDOUT;
 			c->state = CLOSED;
 
@@ -1959,7 +1995,7 @@ struct timeval utcp_timeout(struct utcp *utcp) {
 			continue;
 		}
 
-		if(timerisset(&c->rtrx_timeout) && timercmp(&c->rtrx_timeout, &now, <)) {
+		if(timespec_isset(&c->rtrx_timeout) && timespec_lt(&c->rtrx_timeout, &now)) {
 			debug(c, "retransmitting after timeout\n");
 			retransmit(c);
 		}
@@ -1976,18 +2012,18 @@ struct timeval utcp_timeout(struct utcp *utcp) {
 			}
 		}
 
-		if(timerisset(&c->conn_timeout) && timercmp(&c->conn_timeout, &next, <)) {
+		if(timespec_isset(&c->conn_timeout) && timespec_lt(&c->conn_timeout, &next)) {
 			next = c->conn_timeout;
 		}
 
-		if(timerisset(&c->rtrx_timeout) && timercmp(&c->rtrx_timeout, &next, <)) {
+		if(timespec_isset(&c->rtrx_timeout) && timespec_lt(&c->rtrx_timeout, &next)) {
 			next = c->rtrx_timeout;
 		}
 	}
 
-	struct timeval diff;
+	struct timespec diff;
 
-	timersub(&next, &now, &diff);
+	timespec_sub(&next, &now, &diff);
 
 	return diff;
 }
@@ -2015,6 +2051,12 @@ struct utcp *utcp_init(utcp_accept_t accept, utcp_pre_accept_t pre_accept, utcp_
 
 	if(!utcp) {
 		return NULL;
+	}
+
+	if(!CLOCK_GRANULARITY) {
+		struct timespec res;
+		clock_getres(UTCP_CLOCK, &res);
+		CLOCK_GRANULARITY = res.tv_sec * NSEC_PER_SEC + res.tv_nsec;
 	}
 
 	utcp->accept = accept;
@@ -2091,9 +2133,9 @@ void utcp_reset_timers(struct utcp *utcp) {
 		return;
 	}
 
-	struct timeval now, then;
+	struct timespec now, then;
 
-	gettimeofday(&now, NULL);
+	clock_gettime(UTCP_CLOCK, &now);
 
 	then = now;
 
@@ -2106,11 +2148,11 @@ void utcp_reset_timers(struct utcp *utcp) {
 			continue;
 		}
 
-		if(timerisset(&c->rtrx_timeout)) {
+		if(timespec_isset(&c->rtrx_timeout)) {
 			c->rtrx_timeout = now;
 		}
 
-		if(timerisset(&c->conn_timeout)) {
+		if(timespec_isset(&c->conn_timeout)) {
 			c->conn_timeout = then;
 		}
 
@@ -2251,21 +2293,21 @@ void utcp_expect_data(struct utcp_connection *c, bool expect) {
 
 	if(expect) {
 		// If we expect data, start the connection timer.
-		if(!timerisset(&c->conn_timeout)) {
-			gettimeofday(&c->conn_timeout, NULL);
+		if(!timespec_isset(&c->conn_timeout)) {
+			clock_gettime(UTCP_CLOCK, &c->conn_timeout);
 			c->conn_timeout.tv_sec += c->utcp->timeout;
 		}
 	} else {
 		// If we want to cancel expecting data, only clear the timer when there is no unACKed data.
 		if(c->snd.una == c->snd.last) {
-			timerclear(&c->conn_timeout);
+			timespec_clear(&c->conn_timeout);
 		}
 	}
 }
 
 void utcp_offline(struct utcp *utcp, bool offline) {
-	struct timeval now;
-	gettimeofday(&now, NULL);
+	struct timespec now;
+	clock_gettime(UTCP_CLOCK, &now);
 
 	for(int i = 0; i < utcp->nconnections; i++) {
 		struct utcp_connection *c = utcp->connections[i];
@@ -2277,7 +2319,7 @@ void utcp_offline(struct utcp *utcp, bool offline) {
 		utcp_expect_data(c, offline);
 
 		if(!offline) {
-			if(timerisset(&c->rtrx_timeout)) {
+			if(timespec_isset(&c->rtrx_timeout)) {
 				c->rtrx_timeout = now;
 			}
 

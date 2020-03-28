@@ -73,7 +73,7 @@ extern ssize_t utcp_recv(struct utcp *utcp, const void *data, size_t len);
 extern int utcp_close(struct utcp_connection *connection);
 extern int utcp_abort(struct utcp_connection *connection);
 extern int utcp_shutdown(struct utcp_connection *connection, int how);
-extern struct timeval utcp_timeout(struct utcp *utcp);
+extern struct timespec utcp_timeout(struct utcp *utcp);
 extern void utcp_set_recv_cb(struct utcp_connection *connection, utcp_recv_t recv);
 extern void utcp_set_poll_cb(struct utcp_connection *connection, utcp_poll_t poll);
 extern void utcp_set_accept_cb(struct utcp *utcp, utcp_accept_t accept, utcp_pre_accept_t pre_accept);
