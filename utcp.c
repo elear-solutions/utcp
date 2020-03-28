@@ -2059,6 +2059,10 @@ uint16_t utcp_get_mtu(struct utcp *utcp) {
 	return utcp ? utcp->mtu : 0;
 }
 
+uint16_t utcp_get_mss(struct utcp *utcp) {
+	return utcp ? utcp->mss : 0;
+}
+
 void utcp_set_mtu(struct utcp *utcp, uint16_t mtu) {
 	if(!utcp) {
 		return;

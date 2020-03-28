@@ -86,6 +86,7 @@ extern int utcp_get_user_timeout(struct utcp *utcp);
 extern void utcp_set_user_timeout(struct utcp *utcp, int seconds);
 
 extern uint16_t utcp_get_mtu(struct utcp *utcp);
+extern uint16_t utcp_get_mss(struct utcp *utcp);
 extern void utcp_set_mtu(struct utcp *utcp, uint16_t mtu);
 
 extern void utcp_reset_timers(struct utcp *utcp);
