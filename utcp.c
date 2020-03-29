@@ -320,6 +320,44 @@ static ssize_t buffer_copy(struct buffer *buf, void *data, size_t offset, size_t
 	return len;
 }
 
+// Copy data from the buffer without removing it.
+static ssize_t buffer_call(struct buffer *buf, utcp_recv_t cb, void *arg, size_t offset, size_t len) {
+	// Ensure we don't copy more than is actually stored in the buffer
+	if(offset >= buf->used) {
+		return 0;
+	}
+
+	if(buf->used - offset < len) {
+		len = buf->used - offset;
+	}
+
+	uint32_t realoffset = buf->offset + offset;
+
+	if(buf->size - buf->offset < offset) {
+		// The offset wrapped
+		realoffset -= buf->size;
+	}
+
+	if(buf->size - realoffset < len) {
+		// The data is wrapped
+		ssize_t rx1 = cb(arg, buf->data + realoffset, buf->size - realoffset);
+
+		if(rx1 < buf->size - realoffset) {
+			return rx1;
+		}
+
+		ssize_t rx2 = cb(arg, buf->data, len - (buf->size - realoffset));
+
+		if(rx2 < 0) {
+			return rx2;
+		} else {
+			return rx1 + rx2;
+		}
+	} else {
+		return cb(arg, buf->data + realoffset, len);
+	}
+}
+
 // Discard data from the buffer.
 static ssize_t buffer_discard(struct buffer *buf, size_t len) {
 	if(buf->used < len) {
@@ -1024,20 +1062,29 @@ static void handle_out_of_order(struct utcp_connection *c, uint32_t offset, cons
 }
 
 static void handle_in_order(struct utcp_connection *c, const void *data, size_t len) {
-	// Check if we can process out-of-order data now.
-	if(c->sacks[0].len && len >= c->sacks[0].offset) { // TODO: handle overlap with second SACK
-		debug(c, "incoming packet len %lu connected with SACK at %u\n", (unsigned long)len, c->sacks[0].offset);
-		buffer_put_at(&c->rcvbuf, 0, data, len); // TODO: handle return value
-		len = max(len, c->sacks[0].offset + c->sacks[0].len);
-		data = c->rcvbuf.data;
-	}
-
 	if(c->recv) {
 		ssize_t rxd = c->recv(c, data, len);
 
-		if(rxd < 0 || (size_t)rxd != len) {
+		if(rxd != (ssize_t)len) {
 			// TODO: handle the application not accepting all data.
 			abort();
+		}
+	}
+
+	// Check if we can process out-of-order data now.
+	if(c->sacks[0].len && len >= c->sacks[0].offset) {
+		debug(c, "incoming packet len %lu connected with SACK at %u\n", (unsigned long)len, c->sacks[0].offset);
+
+		if(len < c->sacks[0].offset + c->sacks[0].len) {
+			size_t offset = len;
+			len = c->sacks[0].offset + c->sacks[0].len;
+			size_t remainder = len - offset;
+			ssize_t rxd = buffer_call(&c->rcvbuf, c->recv, c, offset, remainder);
+
+			if(rxd != (ssize_t)remainder) {
+				// TODO: handle the application not accepting all data.
+				abort();
+			}
 		}
 	}
 
