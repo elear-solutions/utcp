@@ -43,6 +43,14 @@
 #undef poll
 #endif
 
+#ifndef UTCP_CLOCK
+#if defined(CLOCK_MONOTONIC_RAW) && defined(__x86_64__)
+#define UTCP_CLOCK CLOCK_MONOTONIC_RAW
+#else
+#define UTCP_CLOCK CLOCK_MONOTONIC
+#endif
+#endif
+
 static void timespec_sub(const struct timespec *a, const struct timespec *b, struct timespec *r) {
 	r->tv_sec = a->tv_sec - b->tv_sec;
 	r->tv_nsec = a->tv_nsec - b->tv_nsec;
@@ -88,14 +96,6 @@ static inline size_t max(size_t a, size_t b) {
 
 #ifndef UTCP_DEBUG_DATALEN
 #define UTCP_DEBUG_DATALEN 20
-#endif
-
-#ifndef UTCP_CLOCK
-#if defined(CLOCK_MONOTONIC_RAW) && defined(__x86_64__)
-#define UTCP_CLOCK CLOCK_MONOTONIC_RAW
-#else
-#define UTCP_CLOCK CLOCK_MONOTONIC
-#endif
 #endif
 
 static void debug(struct utcp_connection *c, const char *format, ...) {
