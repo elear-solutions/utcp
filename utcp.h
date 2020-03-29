@@ -116,4 +116,8 @@ extern size_t utcp_get_outq(struct utcp_connection *connection);
 
 extern void utcp_expect_data(struct utcp_connection *connection, bool expect);
 
+// Completely global options
+
+extern void utcp_set_clock_granularity(long granularity);
+
 #endif

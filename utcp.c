@@ -73,7 +73,7 @@ static bool timespec_isset(const struct timespec *a) {
 	return a->tv_sec;
 }
 
-static long CLOCK_GRANULARITY;
+static long CLOCK_GRANULARITY; // usec
 
 static inline size_t min(size_t a, size_t b) {
 	return a < b ? a : b;
@@ -2056,7 +2056,7 @@ struct utcp *utcp_init(utcp_accept_t accept, utcp_pre_accept_t pre_accept, utcp_
 	if(!CLOCK_GRANULARITY) {
 		struct timespec res;
 		clock_getres(UTCP_CLOCK, &res);
-		CLOCK_GRANULARITY = res.tv_sec * NSEC_PER_SEC + res.tv_nsec;
+		CLOCK_GRANULARITY = res.tv_sec * USEC_PER_SEC + res.tv_nsec / 1000;
 	}
 
 	utcp->accept = accept;
@@ -2330,4 +2330,8 @@ void utcp_offline(struct utcp *utcp, bool offline) {
 	if(!offline && utcp->rto > START_RTO) {
 		utcp->rto = START_RTO;
 	}
+}
+
+void utcp_set_clock_granularity(long granularity) {
+	CLOCK_GRANULARITY = granularity;
 }
