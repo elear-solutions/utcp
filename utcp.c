@@ -220,7 +220,7 @@ static bool buffer_resize(struct buffer *buf, uint32_t newsize) {
 		// [345.........|........012]
 		uint32_t tailsize = buf->size - buf->offset;
 		uint32_t newoffset = newsize - tailsize;
-		memmove(buf + newoffset, buf + buf->offset, tailsize);
+		memmove(buf->data + newoffset, buf->data + buf->offset, tailsize);
 		buf->offset = newoffset;
 	}
 
