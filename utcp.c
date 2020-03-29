@@ -2144,6 +2144,7 @@ void utcp_exit(struct utcp *utcp) {
 	}
 
 	free(utcp->connections);
+	free(utcp->pkt);
 	free(utcp);
 }
 
