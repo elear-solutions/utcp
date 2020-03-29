@@ -106,6 +106,7 @@ struct utcp_connection {
 	uint32_t flags;
 
 	bool reapable;
+	bool do_poll;
 
 	// Callbacks
 
@@ -145,6 +146,7 @@ struct utcp_connection {
 
 	// Buffers
 
+	uint32_t prev_free;
 	struct buffer sndbuf;
 	struct buffer rcvbuf;
 	struct sack sacks[NSACKS];
