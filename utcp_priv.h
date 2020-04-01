@@ -43,8 +43,8 @@
 
 #define DEFAULT_MTU 1000
 
-static const long USEC_PER_SEC = 1000000;
-static const long NSEC_PER_SEC = 1000000000;
+#define USEC_PER_SEC 1000000
+#define NSEC_PER_SEC 1000000000
 static const int DEFAULT_USER_TIMEOUT = 60; // sec
 static const long START_RTO = 1 * USEC_PER_SEC; // usec
 static const long MAX_RTO  = 3 * USEC_PER_SEC; // usec
