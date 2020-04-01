@@ -9,6 +9,8 @@ utcp.o: utcp.c utcp.h utcp_priv.h
 
 test: utcp.o test.c
 
+stream: stream.c
+
 selftest: utcp.o selftest.c
 
 clean:

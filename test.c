@@ -17,41 +17,48 @@
 #define DIR_READ 1
 #define DIR_WRITE 2
 
-struct utcp_connection *c;
-int dir = DIR_READ | DIR_WRITE;
-bool running = true;
-long inpktno;
-long outpktno;
-long dropfrom;
-long dropto;
-double reorder;
-long reorder_dist = 10;
-double dropin;
-double dropout;
-long total_out;
-long total_in;
-FILE *reference;
-long mtu = 1300;
+static struct utcp_connection *c;
+static int dir = DIR_READ | DIR_WRITE;
+static long inpktno;
+static long outpktno;
+static long dropfrom;
+static long dropto;
+static double reorder;
+static long reorder_dist = 10;
+static double dropin;
+static double dropout;
+static long total_out;
+static long total_in;
+static FILE *reference;
+static long mtu;
+static long bufsize;
 
-char *reorder_data;
-size_t reorder_len;
-int reorder_countdown;
+static char *reorder_data;
+static size_t reorder_len;
+static int reorder_countdown;
 
 #if UTCP_DEBUG
-void debug(const char *format, ...) {
-	struct timeval now;
-	gettimeofday(&now, NULL);
-	fprintf(stderr, "%lu.%lu ", now.tv_sec, now.tv_usec / 1000);
+static void debug(const char *format, ...) {
+	struct timespec tv;
+	char buf[1024];
+	int len;
+
+	clock_gettime(CLOCK_REALTIME, &tv);
+	len = snprintf(buf, sizeof(buf), "%ld.%06lu ", (long)tv.tv_sec, tv.tv_nsec / 1000);
 	va_list ap;
 	va_start(ap, format);
-	vfprintf(stderr, format, ap);
+	len += vsnprintf(buf + len, sizeof(buf) - len, format, ap);
 	va_end(ap);
+
+	if(len > 0 && (size_t)len < sizeof(buf)) {
+		fwrite(buf, len, 1, stderr);
+	}
 }
 #else
 #define debug(...) do {} while(0)
 #endif
 
-ssize_t do_recv(struct utcp_connection *c, const void *data, size_t len) {
+static ssize_t do_recv(struct utcp_connection *c, const void *data, size_t len) {
 	(void)c;
 
 	if(!data || !len) {
@@ -83,14 +90,20 @@ ssize_t do_recv(struct utcp_connection *c, const void *data, size_t len) {
 	return write(1, data, len);
 }
 
-void do_accept(struct utcp_connection *nc, uint16_t port) {
+static void do_accept(struct utcp_connection *nc, uint16_t port) {
 	(void)port;
 	utcp_accept(nc, do_recv, NULL);
 	c = nc;
+
+	if(bufsize) {
+		utcp_set_sndbuf(c, bufsize);
+		utcp_set_rcvbuf(c, bufsize);
+	}
+
 	utcp_set_accept_cb(c->utcp, NULL, NULL);
 }
 
-ssize_t do_send(struct utcp *utcp, const void *data, size_t len) {
+static ssize_t do_send(struct utcp *utcp, const void *data, size_t len) {
 	int s = *(int *)utcp->priv;
 	outpktno++;
 
@@ -132,6 +145,21 @@ ssize_t do_send(struct utcp *utcp, const void *data, size_t len) {
 	}
 
 	return result;
+}
+
+static void set_mtu(struct utcp *u, int s) {
+	if(!mtu) {
+		socklen_t optlen = sizeof(mtu);
+		getsockopt(s, IPPROTO_IP, IP_MTU, &mtu, &optlen);
+	}
+
+	if(!mtu || mtu == 65535) {
+		mtu = 1500;
+	}
+
+	debug("Using MTU %lu\n", mtu);
+
+	utcp_set_mtu(u, mtu ? mtu - 28 : 1300);
 }
 
 int main(int argc, char *argv[]) {
@@ -181,6 +209,10 @@ int main(int argc, char *argv[]) {
 
 	if(getenv("MTU")) {
 		mtu = atoi(getenv("MTU"));
+	}
+
+	if(getenv("BUFSIZE")) {
+		bufsize = atoi(getenv("BUFSIZE"));
 	}
 
 	char *reference_filename = getenv("REFERENCE");
@@ -240,11 +272,16 @@ int main(int argc, char *argv[]) {
 		return 1;
 	}
 
-	utcp_set_mtu(u, mtu);
 	utcp_set_user_timeout(u, 10);
 
 	if(!server) {
+		set_mtu(u, s);
 		c = utcp_connect_ex(u, 1, do_recv, NULL, flags);
+
+		if(bufsize) {
+			utcp_set_sndbuf(c, bufsize);
+			utcp_set_rcvbuf(c, bufsize);
+		}
 	}
 
 	struct pollfd fds[2] = {
@@ -254,7 +291,7 @@ int main(int argc, char *argv[]) {
 
 	char buf[102400];
 
-	struct timeval timeout = utcp_timeout(u);
+	struct timespec timeout = utcp_timeout(u);
 
 	while(!connected || utcp_is_active(u)) {
 		size_t max = c ? utcp_get_sndbuf_free(c) : 0;
@@ -267,7 +304,7 @@ int main(int argc, char *argv[]) {
 			max = read_size;
 		}
 
-		int timeout_ms = timeout.tv_sec * 1000 + timeout.tv_usec / 1000 + 1;
+		int timeout_ms = timeout.tv_sec * 1000 + timeout.tv_nsec / 1000000 + 1;
 
 		debug("polling, dir = %d, timeout = %d\n", dir, timeout_ms);
 
@@ -279,8 +316,8 @@ int main(int argc, char *argv[]) {
 
 		if(fds[0].revents) {
 			fds[0].revents = 0;
-			debug("stdin\n");
 			ssize_t len = read(0, buf, max);
+			debug("stdin %zd\n", len);
 
 			if(len <= 0) {
 				fds[0].fd = -1;
@@ -308,20 +345,22 @@ int main(int argc, char *argv[]) {
 
 		if(fds[1].revents) {
 			fds[1].revents = 0;
-			debug("netin\n");
 			struct sockaddr_storage ss;
 			socklen_t sl = sizeof(ss);
 			int len = recvfrom(s, buf, sizeof(buf), MSG_DONTWAIT, (struct sockaddr *)&ss, &sl);
+			debug("netin %zu\n", len);
 
 			if(len <= 0) {
 				debug("Error receiving UDP packet: %s\n", strerror(errno));
 				break;
 			}
 
-			if(!connected)
+			if(!connected) {
 				if(!connect(s, (struct sockaddr *)&ss, sl)) {
 					connected = true;
+					set_mtu(u, s);
 				}
+			}
 
 			inpktno++;
 

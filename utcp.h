@@ -73,7 +73,7 @@ extern ssize_t utcp_recv(struct utcp *utcp, const void *data, size_t len);
 extern int utcp_close(struct utcp_connection *connection);
 extern int utcp_abort(struct utcp_connection *connection);
 extern int utcp_shutdown(struct utcp_connection *connection, int how);
-extern struct timeval utcp_timeout(struct utcp *utcp);
+extern struct timespec utcp_timeout(struct utcp *utcp);
 extern void utcp_set_recv_cb(struct utcp_connection *connection, utcp_recv_t recv);
 extern void utcp_set_poll_cb(struct utcp_connection *connection, utcp_poll_t poll);
 extern void utcp_set_accept_cb(struct utcp *utcp, utcp_accept_t accept, utcp_pre_accept_t pre_accept);
@@ -86,6 +86,7 @@ extern int utcp_get_user_timeout(struct utcp *utcp);
 extern void utcp_set_user_timeout(struct utcp *utcp, int seconds);
 
 extern uint16_t utcp_get_mtu(struct utcp *utcp);
+extern uint16_t utcp_get_mss(struct utcp *utcp);
 extern void utcp_set_mtu(struct utcp *utcp, uint16_t mtu);
 
 extern void utcp_reset_timers(struct utcp *utcp);
@@ -114,5 +115,9 @@ extern void utcp_set_keepalive(struct utcp_connection *connection, bool keepaliv
 extern size_t utcp_get_outq(struct utcp_connection *connection);
 
 extern void utcp_expect_data(struct utcp_connection *connection, bool expect);
+
+// Completely global options
+
+extern void utcp_set_clock_granularity(long granularity);
 
 #endif

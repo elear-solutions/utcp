@@ -43,11 +43,11 @@
 
 #define DEFAULT_MTU 1000
 
-#define USEC_PER_SEC 1000000
-#define DEFAULT_USER_TIMEOUT 60 // sec
-#define CLOCK_GRANULARITY 1000 // usec
-#define START_RTO 1000000 // usec
-#define MAX_RTO 3000000 // usec
+static const long USEC_PER_SEC = 1000000;
+static const long NSEC_PER_SEC = 1000000000;
+static const int DEFAULT_USER_TIMEOUT = 60; // sec
+static const long START_RTO = 1 * USEC_PER_SEC; // usec
+static const long MAX_RTO  = 3 * USEC_PER_SEC; // usec
 
 struct hdr {
 	uint16_t src; // Source port
@@ -89,6 +89,7 @@ static const char *strstate[] __attribute__((unused)) = {
 
 struct buffer {
 	char *data;
+	uint32_t offset;
 	uint32_t used;
 	uint32_t size;
 	uint32_t maxsize;
@@ -105,6 +106,7 @@ struct utcp_connection {
 	uint32_t flags;
 
 	bool reapable;
+	bool do_poll;
 
 	// Callbacks
 
@@ -125,11 +127,11 @@ struct utcp_connection {
 
 		uint32_t last;
 		uint32_t cwnd;
+		uint32_t ssthresh;
 	} snd;
 
 	struct {
 		uint32_t nxt;
-		uint32_t wnd;
 		uint32_t irs;
 	} rcv;
 
@@ -137,13 +139,14 @@ struct utcp_connection {
 
 	// Timers
 
-	struct timeval conn_timeout;
-	struct timeval rtrx_timeout;
-	struct timeval rtt_start;
+	struct timespec conn_timeout;
+	struct timespec rtrx_timeout;
+	struct timespec rtt_start;
 	uint32_t rtt_seq;
 
 	// Buffers
 
+	uint32_t prev_free;
 	struct buffer sndbuf;
 	struct buffer rcvbuf;
 	struct sack sacks[NSACKS];
@@ -156,7 +159,7 @@ struct utcp_connection {
 
 	// Congestion avoidance state
 
-	struct timeval tlast;
+	struct timespec tlast;
 	uint64_t bandwidth;
 };
 
@@ -169,9 +172,14 @@ struct utcp {
 	utcp_pre_accept_t pre_accept;
 	utcp_send_t send;
 
+	// Packet buffer
+
+	void *pkt;
+
 	// Global socket options
 
-	uint16_t mtu;
+	uint16_t mtu; // The maximum size of a UTCP packet, including headers.
+	uint16_t mss; // The maximum size of the payload of a UTCP packet.
 	int timeout; // sec
 
 	// RTT variables
