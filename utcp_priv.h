@@ -43,11 +43,11 @@
 
 #define DEFAULT_MTU 1000
 
-#define USEC_PER_SEC 1000000
-#define NSEC_PER_SEC 1000000000
-static const int DEFAULT_USER_TIMEOUT = 60; // sec
-static const long START_RTO = 1 * USEC_PER_SEC; // usec
-static const long MAX_RTO  = 3 * USEC_PER_SEC; // usec
+#define USEC_PER_SEC 1000000L
+#define NSEC_PER_SEC 1000000000L
+#define DEFAULT_USER_TIMEOUT 60
+#define START_RTO (1 * USEC_PER_SEC)
+#define MAX_RTO (3 * USEC_PER_SEC)
 
 struct hdr {
 	uint16_t src; // Source port
