@@ -145,12 +145,13 @@ static void print_packet(struct utcp_connection *c, const char *dir, const void 
 
 	*p = 0;
 
-	debug(c, "%s: len %lu src %u dst %u seq %u ack %u wnd %u aux %x ctl %s%s%s%s data %s\n",
+	debug(c, "%s: len %lu src %u dst %u seq %u ack %u wnd %u aux %x ctl %s%s%s%s%s data %s\n",
 	      dir, (unsigned long)len, hdr.src, hdr.dst, hdr.seq, hdr.ack, hdr.wnd, hdr.aux,
 	      hdr.ctl & SYN ? "SYN" : "",
 	      hdr.ctl & RST ? "RST" : "",
 	      hdr.ctl & FIN ? "FIN" : "",
 	      hdr.ctl & ACK ? "ACK" : "",
+	      hdr.ctl & MF ? "MF" : "",
 	      str
 	     );
 }
@@ -368,10 +369,20 @@ static ssize_t buffer_discard(struct buffer *buf, size_t len) {
 		buf->offset -= buf->size;
 	}
 
-	buf->offset += len;
+	if(buf->used == len) {
+		buf->offset = 0;
+	} else {
+		buf->offset += len;
+	}
+
 	buf->used -= len;
 
 	return len;
+}
+
+static void buffer_clear(struct buffer *buf) {
+	buf->used = 0;
+	buf->offset = 0;
 }
 
 static bool buffer_set_size(struct buffer *buf, uint32_t minsize, uint32_t maxsize) {
@@ -644,7 +655,7 @@ void utcp_accept(struct utcp_connection *c, utcp_recv_t recv, void *priv) {
 
 static void ack(struct utcp_connection *c, bool sendatleastone) {
 	int32_t left = seqdiff(c->snd.last, c->snd.nxt);
-	int32_t cwndleft = min(c->snd.cwnd, c->snd.wnd) - seqdiff(c->snd.nxt, c->snd.una);
+	int32_t cwndleft = is_reliable(c) ? min(c->snd.cwnd, c->snd.wnd) - seqdiff(c->snd.nxt, c->snd.una) : MAX_UNRELIABLE_SIZE;
 
 	assert(left >= 0);
 
@@ -672,7 +683,7 @@ static void ack(struct utcp_connection *c, bool sendatleastone) {
 	pkt->hdr.src = c->src;
 	pkt->hdr.dst = c->dst;
 	pkt->hdr.ack = c->rcv.nxt;
-	pkt->hdr.wnd = c->rcvbuf.maxsize;
+	pkt->hdr.wnd = is_reliable(c) ? c->rcvbuf.maxsize : 0;
 	pkt->hdr.ctl = ACK;
 	pkt->hdr.aux = 0;
 
@@ -684,6 +695,14 @@ static void ack(struct utcp_connection *c, bool sendatleastone) {
 
 		c->snd.nxt += seglen;
 		left -= seglen;
+
+		if(!is_reliable(c)) {
+			if(left) {
+				pkt->hdr.ctl |= MF;
+			} else {
+				pkt->hdr.ctl &= ~MF;
+			}
+		}
 
 		if(seglen && fin_wanted(c, c->snd.nxt)) {
 			seglen--;
@@ -699,6 +718,10 @@ static void ack(struct utcp_connection *c, bool sendatleastone) {
 
 		print_packet(c, "send", pkt, sizeof(pkt->hdr) + seglen);
 		c->utcp->send(c->utcp, pkt, sizeof(pkt->hdr) + seglen);
+
+		if(left && !is_reliable(c)) {
+			pkt->hdr.wnd += seglen;
+		}
 	} while(left);
 }
 
@@ -759,8 +782,13 @@ ssize_t utcp_send(struct utcp_connection *c, const void *data, size_t len) {
 
 	// Add data to send buffer.
 
-	if(is_reliable(c) || (c->state != SYN_SENT && c->state != SYN_RECEIVED)) {
+	if(is_reliable(c)) {
 		len = buffer_put(&c->sndbuf, data, len);
+	} else if(c->state != SYN_SENT && c->state != SYN_RECEIVED) {
+		if(len > MAX_UNRELIABLE_SIZE || buffer_put(&c->sndbuf, data, len) != (ssize_t)len) {
+			errno = EMSGSIZE;
+			return -1;
+		}
 	} else {
 		return 0;
 	}
@@ -1095,15 +1123,50 @@ static void handle_in_order(struct utcp_connection *c, const void *data, size_t 
 	c->rcv.nxt += len;
 }
 
-
-static void handle_incoming_data(struct utcp_connection *c, uint32_t seq, const void *data, size_t len) {
-	if(!is_reliable(c)) {
+static void handle_unreliable(struct utcp_connection *c, const struct hdr *hdr, const void *data, size_t len) {
+	// Fast path for unfragmented packets
+	if(!hdr->wnd && !(hdr->ctl & MF)) {
 		c->recv(c, data, len);
-		c->rcv.nxt = seq + len;
+		c->rcv.nxt = hdr->seq + len;
 		return;
 	}
 
-	uint32_t offset = seqdiff(seq, c->rcv.nxt);
+	// Ensure reassembled packet are not larger than 64 kiB
+	if(hdr->wnd >= MAX_UNRELIABLE_SIZE || hdr->wnd + len > MAX_UNRELIABLE_SIZE) {
+		return;
+	}
+
+	// Don't accept out of order fragments
+	if(hdr->wnd && hdr->seq != c->rcv.nxt) {
+		return;
+	}
+
+	// Reset the receive buffer for the first fragment
+	if(!hdr->wnd) {
+		buffer_clear(&c->rcvbuf);
+	}
+
+	ssize_t rxd = buffer_put_at(&c->rcvbuf, hdr->wnd, data, len);
+
+	if(rxd != (ssize_t)len) {
+		return;
+	}
+
+	// Send the packet if it's the final fragment
+	if(!(hdr->ctl & MF)) {
+		buffer_call(&c->rcvbuf, c->recv, c, 0, hdr->wnd + len);
+	}
+
+	c->rcv.nxt = hdr->seq + len;
+}
+
+static void handle_incoming_data(struct utcp_connection *c, const struct hdr *hdr, const void *data, size_t len) {
+	if(!is_reliable(c)) {
+		handle_unreliable(c, hdr, data, len);
+		return;
+	}
+
+	uint32_t offset = seqdiff(hdr->seq, c->rcv.nxt);
 
 	if(offset + len > c->rcvbuf.maxsize) {
 		abort();
@@ -1160,7 +1223,7 @@ ssize_t utcp_recv(struct utcp *utcp, const void *data, size_t len) {
 
 	// Drop packets with an unknown CTL flag
 
-	if(hdr.ctl & ~(SYN | ACK | RST | FIN)) {
+	if(hdr.ctl & ~(SYN | ACK | RST | FIN | MF)) {
 		print_packet(NULL, "recv", data, len);
 		errno = EBADMSG;
 		return -1;
@@ -1372,10 +1435,6 @@ synack:
 
 		if(rcv_offset) {
 			debug(c, "packet out of order, offset %u bytes", rcv_offset);
-		}
-
-		if(rcv_offset >= 0) {
-			c->rcv.nxt = hdr.seq + len;
 		}
 
 #endif
@@ -1733,7 +1792,7 @@ skip_ack:
 			return 0;
 		}
 
-		handle_incoming_data(c, hdr.seq, ptr, len);
+		handle_incoming_data(c, &hdr, ptr, len);
 	}
 
 	// 7. Process FIN stuff

@@ -29,6 +29,7 @@
 #define ACK 2
 #define FIN 4
 #define RST 8
+#define MF 16
 
 #define AUX_INIT 1
 #define AUX_FRAME 2
@@ -41,6 +42,7 @@
 #define DEFAULT_RCVBUFSIZE 0
 #define DEFAULT_MAXRCVBUFSIZE 131072
 
+#define MAX_UNRELIABLE_SIZE 65536
 #define DEFAULT_MTU 1000
 
 #define USEC_PER_SEC 1000000L
