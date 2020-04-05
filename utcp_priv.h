@@ -146,6 +146,12 @@ struct utcp_connection {
 	struct timespec rtt_start;
 	uint32_t rtt_seq;
 
+	// RTT variables
+
+	uint32_t srtt; // usec
+	uint32_t rttvar; // usec
+	uint32_t rto; // usec
+
 	// Buffers
 
 	uint32_t prev_free;
@@ -183,12 +189,6 @@ struct utcp {
 	uint16_t mtu; // The maximum size of a UTCP packet, including headers.
 	uint16_t mss; // The maximum size of the payload of a UTCP packet.
 	int timeout; // sec
-
-	// RTT variables
-
-	uint32_t srtt; // usec
-	uint32_t rttvar; // usec
-	uint32_t rto; // usec
 
 	// Connection management
 
