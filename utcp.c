@@ -524,6 +524,9 @@ static struct utcp_connection *allocate_connection(struct utcp *utcp, uint16_t s
 	c->snd.cwnd = (utcp->mss > 2190 ? 2 : utcp->mss > 1095 ? 3 : 4) * utcp->mss;
 	c->snd.ssthresh = ~0;
 	debug_cwnd(c);
+	c->srtt = 0;
+	c->rttvar = 0;
+	c->rto = START_RTO;
 	c->utcp = utcp;
 
 	// Add it to the sorted list of connections
@@ -549,36 +552,34 @@ static void update_rtt(struct utcp_connection *c, uint32_t rtt) {
 		return;
 	}
 
-	struct utcp *utcp = c->utcp;
-
-	if(!utcp->srtt) {
-		utcp->srtt = rtt;
-		utcp->rttvar = rtt / 2;
+	if(!c->srtt) {
+		c->srtt = rtt;
+		c->rttvar = rtt / 2;
 	} else {
-		utcp->rttvar = (utcp->rttvar * 3 + absdiff(utcp->srtt, rtt)) / 4;
-		utcp->srtt = (utcp->srtt * 7 + rtt) / 8;
+		c->rttvar = (c->rttvar * 3 + absdiff(c->srtt, rtt)) / 4;
+		c->srtt = (c->srtt * 7 + rtt) / 8;
 	}
 
-	utcp->rto = utcp->srtt + max(4 * utcp->rttvar, CLOCK_GRANULARITY);
+	c->rto = c->srtt + max(4 * c->rttvar, CLOCK_GRANULARITY);
 
-	if(utcp->rto > MAX_RTO) {
-		utcp->rto = MAX_RTO;
+	if(c->rto > MAX_RTO) {
+		c->rto = MAX_RTO;
 	}
 
-	debug(c, "rtt %u srtt %u rttvar %u rto %u\n", rtt, utcp->srtt, utcp->rttvar, utcp->rto);
+	debug(c, "rtt %u srtt %u rttvar %u rto %u\n", rtt, c->srtt, c->rttvar, c->rto);
 }
 
 static void start_retransmit_timer(struct utcp_connection *c) {
 	clock_gettime(UTCP_CLOCK, &c->rtrx_timeout);
 
-	uint32_t rto = c->utcp->rto;
+	uint32_t rto = c->rto;
 
 	while(rto > USEC_PER_SEC) {
 		c->rtrx_timeout.tv_sec++;
 		rto -= USEC_PER_SEC;
 	}
 
-	c->rtrx_timeout.tv_nsec += c->utcp->rto * 1000;
+	c->rtrx_timeout.tv_nsec += c->rto * 1000;
 
 	if(c->rtrx_timeout.tv_nsec >= NSEC_PER_SEC) {
 		c->rtrx_timeout.tv_nsec -= NSEC_PER_SEC;
@@ -973,10 +974,10 @@ static void retransmit(struct utcp_connection *c) {
 	}
 
 	start_retransmit_timer(c);
-	utcp->rto *= 2;
+	c->rto *= 2;
 
-	if(utcp->rto > MAX_RTO) {
-		utcp->rto = MAX_RTO;
+	if(c->rto > MAX_RTO) {
+		c->rto = MAX_RTO;
 	}
 
 	c->rtt_start.tv_sec = 0; // invalidate RTT timer
@@ -2173,7 +2174,6 @@ struct utcp *utcp_init(utcp_accept_t accept, utcp_pre_accept_t pre_accept, utcp_
 	utcp->priv = priv;
 	utcp_set_mtu(utcp, DEFAULT_MTU);
 	utcp->timeout = DEFAULT_USER_TIMEOUT; // sec
-	utcp->rto = START_RTO; // usec
 
 	return utcp;
 }
@@ -2266,10 +2266,10 @@ void utcp_reset_timers(struct utcp *utcp) {
 		}
 
 		c->rtt_start.tv_sec = 0;
-	}
 
-	if(utcp->rto > START_RTO) {
-		utcp->rto = START_RTO;
+		if(c->rto > START_RTO) {
+			c->rto = START_RTO;
+		}
 	}
 }
 
@@ -2436,11 +2436,11 @@ void utcp_offline(struct utcp *utcp, bool offline) {
 			}
 
 			utcp->connections[i]->rtt_start.tv_sec = 0;
-		}
-	}
 
-	if(!offline && utcp->rto > START_RTO) {
-		utcp->rto = START_RTO;
+			if(c->rto > START_RTO) {
+				c->rto = START_RTO;
+			}
+		}
 	}
 }
 
