@@ -61,8 +61,7 @@ static void timespec_sub(const struct timespec *a, const struct timespec *b, str
 }
 
 static int32_t timespec_diff_usec(const struct timespec *a, const struct timespec *b) {
-	int64_t diff = (a->tv_sec - b->tv_sec) * 1000000000 + a->tv_sec - b->tv_sec;
-	return diff / 1000;
+	return (a->tv_sec - b->tv_sec) * 1000000 + (a->tv_nsec - b->tv_nsec) / 1000;
 }
 
 static bool timespec_lt(const struct timespec *a, const struct timespec *b) {
