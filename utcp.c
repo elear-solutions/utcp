@@ -74,6 +74,7 @@ static bool timespec_lt(const struct timespec *a, const struct timespec *b) {
 
 static void timespec_clear(struct timespec *a) {
 	a->tv_sec = 0;
+	a->tv_nsec = 0;
 }
 
 static bool timespec_isset(const struct timespec *a) {
@@ -579,7 +580,7 @@ static void start_retransmit_timer(struct utcp_connection *c) {
 		rto -= USEC_PER_SEC;
 	}
 
-	c->rtrx_timeout.tv_nsec += c->rto * 1000;
+	c->rtrx_timeout.tv_nsec += rto * 1000;
 
 	if(c->rtrx_timeout.tv_nsec >= NSEC_PER_SEC) {
 		c->rtrx_timeout.tv_nsec -= NSEC_PER_SEC;
