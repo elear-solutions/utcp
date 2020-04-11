@@ -1046,8 +1046,14 @@ static void handle_out_of_order(struct utcp_connection *c, uint32_t offset, cons
 	// Packet loss or reordering occured. Store the data in the buffer.
 	ssize_t rxd = buffer_put_at(&c->rcvbuf, offset, data, len);
 
-	if(rxd < 0 || (size_t)rxd < len) {
-		abort();
+	if(rxd <= 0) {
+		debug(c, "packet outside receive buffer, dropping\n");
+		return;
+	}
+
+	if((size_t)rxd < len) {
+		debug(c, "packet partially outside receive buffer\n");
+		len = rxd;
 	}
 
 	// Make note of where we put it.
@@ -1168,10 +1174,6 @@ static void handle_incoming_data(struct utcp_connection *c, const struct hdr *hd
 	}
 
 	uint32_t offset = seqdiff(hdr->seq, c->rcv.nxt);
-
-	if(offset + len > c->rcvbuf.maxsize) {
-		abort();
-	}
 
 	if(offset) {
 		handle_out_of_order(c, offset, data, len);
