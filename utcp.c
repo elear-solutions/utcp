@@ -401,7 +401,7 @@ static void buffer_exit(struct buffer *buf) {
 }
 
 static uint32_t buffer_free(const struct buffer *buf) {
-	return buf->maxsize - buf->used;
+	return buf->maxsize > buf->used ? buf->maxsize - buf->used : 0;
 }
 
 // Connections are stored in a sorted list.
