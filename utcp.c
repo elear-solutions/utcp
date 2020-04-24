@@ -96,6 +96,7 @@ static inline size_t max(size_t a, size_t b) {
 	return a > b ? a : b;
 }
 
+#define UTCP_DEBUG 1
 #ifdef UTCP_DEBUG
 #include <stdarg.h>
 
@@ -116,7 +117,7 @@ static void debug(struct utcp_connection *c, const char *format, ...) {
 	va_end(ap);
 
 	if(len > 0 && (size_t)len < sizeof(buf)) {
-		fwrite(buf, len, 1, stderr);
+		fwrite(buf, len, 1, stdout);
 	}
 }
 
@@ -204,7 +205,8 @@ static bool fin_wanted(struct utcp_connection *c, uint32_t seq) {
 }
 
 static bool is_reliable(struct utcp_connection *c) {
-	debug(NULL, "%s.%d. called\n", __func__, __LINE__);
+	debug(NULL, "%s.%d. called, c: %p, c->flags & UTCP_RELIABLE: %d\n", __func__, __LINE__, c);
+	debug(NULL, "%s.%d. c->flags & UTCP_RELIABLE: %d\n", __func__, __LINE__, c->flags & UTCP_RELIABLE);
 	return c->flags & UTCP_RELIABLE;
 }
 
@@ -791,7 +793,7 @@ static void ack(struct utcp_connection *c, bool sendatleastone) {
 			pkt->hdr.ctl |= FIN;
 		}
 
-	debug(c, "%s.%d. Start RTT measurment\n", __func__, __LINE__);
+	debug(c, "%s.%d. Start RTT measurment, c->rtt_start.tv_sec: %lu\n", __func__, __LINE__, c->rtt_start.tv_sec);
 		if(!c->rtt_start.tv_sec) {
 			// Start RTT measurement
 			clock_gettime(UTCP_CLOCK, &c->rtt_start);
@@ -800,10 +802,18 @@ static void ack(struct utcp_connection *c, bool sendatleastone) {
 		}
 
 		print_packet(c, "send", pkt, sizeof(pkt->hdr) + seglen);
+	debug(c, "%s.%d. calling utcpsend\n", __func__, __LINE__);
+	debug(c, "%s.%d. sizeof(pkt->hdr): %lu, seglen: %lu\n", __func__, __LINE__, sizeof(pkt->hdr), seglen);
+	debug(c, "%s.%d. c->utcp: %p, pkt: %p, sizeof(pkt->hdr) + seglen: %lu\n", __func__, __LINE__, c->utcp, pkt, sizeof(pkt->hdr) + seglen);
 		c->utcp->send(c->utcp, pkt, sizeof(pkt->hdr) + seglen);
+	debug(c, "%s.%d. utcp send done\n", __func__, __LINE__);
 
+	debug(c, "%s.%d. left: %d\n", __func__, __LINE__, left);
 		if(left && !is_reliable(c)) {
+	debug(c, "%s.%d. pkt->hdr: %p\n", __func__, __LINE__, pkt->hdr);
+	debug(c, "%s.%d. pkt->hdr.wnd: %lu, seglen: %lu\n", __func__, __LINE__, pkt->hdr.wnd, seglen);
 			pkt->hdr.wnd += seglen;
+	debug(c, "%s.%d. pkt->hdr.wnd: %lu\n", __func__, __LINE__, pkt->hdr.wnd);
 		}
 	debug(c, "%s.%d. Sent ACK\n", __func__, __LINE__);
 	} while(left);
