@@ -211,7 +211,7 @@ static bool is_reliable(struct utcp_connection *c) {
 }
 
 static int32_t seqdiff(uint32_t a, uint32_t b) {
-	debug(NULL, "%s.%d. Called\n", __func__, __LINE__);
+	debug(NULL, "%s.%d. Called, a: %d b: %d, a-b: %d\n", __func__, __LINE__, a, b, a-b);
 	return a - b;
 }
 
@@ -733,8 +733,10 @@ static void ack(struct utcp_connection *c, bool sendatleastone) {
 	debug(NULL, "%s.%d. Started\n", __func__, __LINE__);
 	int32_t left = seqdiff(c->snd.last, c->snd.nxt);
 	debug(c, "%s.%d. Calculate cwd left size\n", __func__, __LINE__);
+	debug(c, "%s.%d. c->snd.cwnd: %d c->snd.wnd: %d c->snd.nxt: %d c->snd.una: %d\n", __func__, __LINE__, c->snd.cwnd, c->snd.wnd, c->snd.nxt, c->snd.una);
 	int32_t cwndleft = is_reliable(c) ? min(c->snd.cwnd, c->snd.wnd) - seqdiff(c->snd.nxt, c->snd.una) : MAX_UNRELIABLE_SIZE;
 
+	debug(c, "%s.%d. cwndleft: %d\n", __func__, __LINE__, cwndleft);
 	assert(left >= 0);
 
 	debug(c, "%s.%d. If cwd left size <= 0\n", __func__, __LINE__);
@@ -743,8 +745,11 @@ static void ack(struct utcp_connection *c, bool sendatleastone) {
 	} else if(cwndleft < left) {
 		left = cwndleft;
 
+	debug(c, "%s.%d. sendatleastone: %d, cwndleft: %d, c->utcp->mss: %d\n", __func__, __LINE__, sendatleastone, cwndleft, c->utcp->mss);
 		if(!sendatleastone || cwndleft > c->utcp->mss) {
+	debug(c, "%s.%d. left: %d\n", __func__, __LINE__, left);
 			left -= left % c->utcp->mss;
+	debug(c, "%s.%d. left: %d\n", __func__, __LINE__, left);
 		}
 	}
 
@@ -769,14 +774,18 @@ static void ack(struct utcp_connection *c, bool sendatleastone) {
 
 	debug(c, "%s.%d. Send ACK in a loop\n", __func__, __LINE__);
 	do {
+	debug(c, "%s.%d. left > c->utcp->mss ? c->utcp->mss : left\n", __func__, __LINE__);
+	debug(c, "%s.%d. %d > %d ? %d : %d\n", __func__, __LINE__, left, c->utcp->mss, c->utcp->mss, left);
 		uint32_t seglen = left > c->utcp->mss ? c->utcp->mss : left;
 		pkt->hdr.seq = c->snd.nxt;
 
-	debug(c, "%s.%d. Buffer copy\n", __func__, __LINE__);
+	debug(c, "%s.%d. Buffer copy, offset: %d len: %d\n", __func__, __LINE__, seqdiff(c->snd.nxt, c->snd.una), seglen);
 		buffer_copy(&c->sndbuf, pkt->data, seqdiff(c->snd.nxt, c->snd.una), seglen);
 
+	debug(c, "%s.%d. c->snd.nxt: %d seglen: %d, left: %d\n", __func__, __LINE__, c->snd.nxt, seglen, left);
 		c->snd.nxt += seglen;
 		left -= seglen;
+	debug(c, "%s.%d. c->snd.nxt: %d seglen: %d, left: %d\n", __func__, __LINE__, c->snd.nxt, seglen, left);
 
 	debug(c, "%s.%d. Is reliable\n", __func__, __LINE__);
 		if(!is_reliable(c)) {
@@ -805,6 +814,7 @@ static void ack(struct utcp_connection *c, bool sendatleastone) {
 	debug(c, "%s.%d. calling utcpsend\n", __func__, __LINE__);
 	debug(c, "%s.%d. sizeof(pkt->hdr): %lu, seglen: %lu\n", __func__, __LINE__, sizeof(pkt->hdr), seglen);
 	debug(c, "%s.%d. c->utcp: %p, pkt: %p, sizeof(pkt->hdr) + seglen: %lu\n", __func__, __LINE__, c->utcp, pkt, sizeof(pkt->hdr) + seglen);
+	debug(c, "%s.%d. c->utcp->send: %p\n", __func__, __LINE__, c->utcp->send);
 		c->utcp->send(c->utcp, pkt, sizeof(pkt->hdr) + seglen);
 	debug(c, "%s.%d. utcp send done\n", __func__, __LINE__);
 
