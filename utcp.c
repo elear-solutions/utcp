@@ -58,6 +58,8 @@ static inline size_t max(size_t a, size_t b) {
 	return a > b ? a : b;
 }
 
+#define UTCP_DEBUG 1
+
 #ifdef UTCP_DEBUG
 #include <stdarg.h>
 
@@ -129,7 +131,9 @@ static void set_state(struct utcp_connection *c, enum state state) {
 }
 
 static bool fin_wanted(struct utcp_connection *c, uint32_t seq) {
+	debug("%s.%d. called\n", __func__, __LINE__);
 	if(seq != c->snd.last) {
+	debug("%s.%d. seq != c->snd.last\n", __func__, __LINE__);
 		return false;
 	}
 
@@ -137,18 +141,24 @@ static bool fin_wanted(struct utcp_connection *c, uint32_t seq) {
 	case FIN_WAIT_1:
 	case CLOSING:
 	case LAST_ACK:
+	debug("%s.%d. LAST ACK\n", __func__, __LINE__);
 		return true;
 
 	default:
+	debug("%s.%d. Default\n", __func__, __LINE__);
 		return false;
 	}
+	debug("%s.%d. Done\n", __func__, __LINE__);
 }
 
 static bool is_reliable(struct utcp_connection *c) {
+	debug("%s.%d. called, c: %p, c->flags & UTCP_RELIABLE: %d\n", __func__, __LINE__, c);
+	debug("%s.%d. c->flags & UTCP_RELIABLE: %d\n", __func__, __LINE__, c->flags & UTCP_RELIABLE);
 	return c->flags & UTCP_RELIABLE;
 }
 
 static int32_t seqdiff(uint32_t a, uint32_t b) {
+	debug("%s.%d. Called, a: %d b: %d, a-b: %d\n", __func__, __LINE__, a, b, a-b);
 	return a - b;
 }
 
@@ -157,6 +167,7 @@ static int32_t seqdiff(uint32_t a, uint32_t b) {
 
 // Store data into the buffer
 static ssize_t buffer_put_at(struct buffer *buf, size_t offset, const void *data, size_t len) {
+	debug("%s.%d. Started\n", __func__, __LINE__);
 	debug("buffer_put_at %lu %lu %lu\n", (unsigned long)buf->used, (unsigned long)offset, (unsigned long)len);
 
 	size_t required = offset + len;
@@ -201,10 +212,12 @@ static ssize_t buffer_put_at(struct buffer *buf, size_t offset, const void *data
 		buf->used = required;
 	}
 
+	debug("%s.%d. Done\n", __func__, __LINE__);
 	return len;
 }
 
 static ssize_t buffer_put(struct buffer *buf, const void *data, size_t len) {
+	debug("%s.%d. called\n", __func__, __LINE__);
 	return buffer_put_at(buf, buf->used, data, len);
 }
 
@@ -257,11 +270,14 @@ static bool buffer_init(struct buffer *buf, uint32_t len, uint32_t maxlen) {
 }
 
 static void buffer_exit(struct buffer *buf) {
+	debug("%s.%d. Started\n", __func__, __LINE__);
 	free(buf->data);
 	memset(buf, 0, sizeof(*buf));
+	debug("%s.%d. Done\n", __func__, __LINE__);
 }
 
 static uint32_t buffer_free(const struct buffer *buf) {
+	debug("%s.%d. Buffer free called\n", __func__, __LINE__);
 	return buf->maxsize - buf->used;
 }
 
@@ -269,6 +285,7 @@ static uint32_t buffer_free(const struct buffer *buf) {
 // This gives O(log(N)) lookup time, O(N log(N)) insertion time and O(N) deletion time.
 
 static int compare(const void *va, const void *vb) {
+	debug("%s.%d. Compare connections\n", __func__, __LINE__);
 	assert(va && vb);
 
 	const struct utcp_connection *a = *(struct utcp_connection **)va;
@@ -280,15 +297,19 @@ static int compare(const void *va, const void *vb) {
 	int c = (int)a->src - (int)b->src;
 
 	if(c) {
+	debug("%s.%d. Done\n", __func__, __LINE__);
 		return c;
 	}
 
 	c = (int)a->dst - (int)b->dst;
+	debug("%s.%d. Done\n", __func__, __LINE__);
 	return c;
 }
 
 static struct utcp_connection *find_connection(const struct utcp *utcp, uint16_t src, uint16_t dst) {
+	debug("%s.%d. Started\n", __func__, __LINE__);
 	if(!utcp->nconnections) {
+	debug("%s.%d. NULL Done\n", __func__, __LINE__);
 		return NULL;
 	}
 
@@ -296,11 +317,14 @@ static struct utcp_connection *find_connection(const struct utcp *utcp, uint16_t
 		.src = src,
 		.dst = dst,
 	}, *keyp = &key;
+	debug("%s.%d. bsearch\n", __func__, __LINE__);
 	struct utcp_connection **match = bsearch(&keyp, utcp->connections, utcp->nconnections, sizeof(*utcp->connections), compare);
+	debug("%s.%d. Done\n", __func__, __LINE__);
 	return match ? *match : NULL;
 }
 
 static void free_connection(struct utcp_connection *c) {
+	debug("%s.%d. Started\n", __func__, __LINE__);
 	struct utcp *utcp = c->utcp;
 	struct utcp_connection **cp = bsearch(&c, utcp->connections, utcp->nconnections, sizeof(*utcp->connections), compare);
 
@@ -313,9 +337,11 @@ static void free_connection(struct utcp_connection *c) {
 	buffer_exit(&c->rcvbuf);
 	buffer_exit(&c->sndbuf);
 	free(c);
+	debug("%s.%d. Done\n", __func__, __LINE__);
 }
 
 static struct utcp_connection *allocate_connection(struct utcp *utcp, uint16_t src, uint16_t dst) {
+	debug("%s.%d. Started\n", __func__, __LINE__);
 	// Check whether this combination of src and dst is free
 
 	if(src) {
@@ -392,19 +418,24 @@ static struct utcp_connection *allocate_connection(struct utcp *utcp, uint16_t s
 	utcp->connections[utcp->nconnections++] = c;
 	qsort(utcp->connections, utcp->nconnections, sizeof(*utcp->connections), compare);
 
+	debug("%s.%d. Done\n", __func__, __LINE__);
 	return c;
 }
 
 static inline uint32_t absdiff(uint32_t a, uint32_t b) {
+	debug("%s.%d. Called\n", __func__, __LINE__);
 	if(a > b) {
+	debug("%s.%d. a - b\n", __func__, __LINE__);
 		return a - b;
 	} else {
+	debug("%s.%d. b - a\n", __func__, __LINE__);
 		return b - a;
 	}
 }
 
 // Update RTT variables. See RFC 6298.
 static void update_rtt(struct utcp_connection *c, uint32_t rtt) {
+	debug("%s.%d. Started\n", __func__, __LINE__);
 	if(!rtt) {
 		debug("invalid rtt\n");
 		return;
@@ -447,6 +478,7 @@ static void stop_retransmit_timer(struct utcp_connection *c) {
 }
 
 struct utcp_connection *utcp_connect_ex(struct utcp *utcp, uint16_t dst, utcp_recv_t recv, void *priv, uint32_t flags) {
+	debug("%s.%d. Started\n", __func__, __LINE__);
 	struct utcp_connection *c = allocate_connection(utcp, 0, dst);
 
 	if(!c) {
@@ -486,6 +518,7 @@ struct utcp_connection *utcp_connect_ex(struct utcp *utcp, uint16_t dst, utcp_re
 
 	start_retransmit_timer(c);
 
+	debug("%s.%d. Done\n", __func__, __LINE__);
 	return c;
 }
 
@@ -494,6 +527,7 @@ struct utcp_connection *utcp_connect(struct utcp *utcp, uint16_t dst, utcp_recv_
 }
 
 void utcp_accept(struct utcp_connection *c, utcp_recv_t recv, void *priv) {
+	debug("%s.%d. Called\n", __func__, __LINE__);
 	if(c->reapable || c->state != SYN_RECEIVED) {
 		debug("Error: accept() called on invalid connection %p in state %s\n", c, strstate[c->state]);
 		return;
@@ -503,15 +537,19 @@ void utcp_accept(struct utcp_connection *c, utcp_recv_t recv, void *priv) {
 	c->recv = recv;
 	c->priv = priv;
 	set_state(c, ESTABLISHED);
+	debug("%s.%d. Done\n", __func__, __LINE__);
 }
 
 static void ack(struct utcp_connection *c, bool sendatleastone) {
+	debug("%s.%d. Started\n", __func__, __LINE__);
 	int32_t left = seqdiff(c->snd.last, c->snd.nxt);
 	int32_t cwndleft = c->snd.cwnd - seqdiff(c->snd.nxt, c->snd.una);
 	debug("cwndleft = %d\n", cwndleft);
 
+	debug("%s.%d. cwndleft: %d\n", __func__, __LINE__, cwndleft);
 	assert(left >= 0);
 
+	debug("%s.%d. If cwd left size <= 0\n", __func__, __LINE__);
 	if(cwndleft <= 0) {
 		cwndleft = 0;
 	}
@@ -520,7 +558,10 @@ static void ack(struct utcp_connection *c, bool sendatleastone) {
 		left = cwndleft;
 	}
 
+	debug("cwndleft %d left %d\n", cwndleft, left);
+
 	if(!left && !sendatleastone) {
+	debug("%s.%d. !left && !sendatleastone\n", __func__, __LINE__);
 		return;
 	}
 
@@ -542,20 +583,26 @@ static void ack(struct utcp_connection *c, bool sendatleastone) {
 	pkt->hdr.ctl = ACK;
 	pkt->hdr.aux = 0;
 
+	debug("%s.%d. Send ACK in a loop\n", __func__, __LINE__);
 	do {
 		uint32_t seglen = left > c->utcp->mtu ? c->utcp->mtu : left;
 		pkt->hdr.seq = c->snd.nxt;
 
+	debug("%s.%d. Buffer copy, offset: %d len: %d\n", __func__, __LINE__, seqdiff(c->snd.nxt, c->snd.una), seglen);
 		buffer_copy(&c->sndbuf, pkt->data, seqdiff(c->snd.nxt, c->snd.una), seglen);
 
+	debug("%s.%d. c->snd.nxt: %d seglen: %d, left: %d\n", __func__, __LINE__, c->snd.nxt, seglen, left);
 		c->snd.nxt += seglen;
 		left -= seglen;
+	debug("%s.%d. c->snd.nxt: %d seglen: %d, left: %d\n", __func__, __LINE__, c->snd.nxt, seglen, left);
 
+	debug("%s.%d. Is reliable\n", __func__, __LINE__);
 		if(seglen && fin_wanted(c, c->snd.nxt)) {
 			seglen--;
 			pkt->hdr.ctl |= FIN;
 		}
 
+	debug("%s.%d. Start RTT measurment, c->rtt_start.tv_sec: %lu\n", __func__, __LINE__, c->rtt_start.tv_sec);
 		if(!c->rtt_start.tv_sec) {
 			// Start RTT measurement
 			gettimeofday(&c->rtt_start, NULL);
@@ -564,19 +611,26 @@ static void ack(struct utcp_connection *c, bool sendatleastone) {
 		}
 
 		print_packet(c->utcp, "send", pkt, sizeof(pkt->hdr) + seglen);
+	debug("%s.%d. calling utcpsend\n", __func__, __LINE__);
+	debug("%s.%d. sizeof(pkt->hdr): %lu, seglen: %lu\n", __func__, __LINE__, sizeof(pkt->hdr), seglen);
+	debug("%s.%d. c->utcp: %p, pkt: %p, sizeof(pkt->hdr) + seglen: %lu\n", __func__, __LINE__, c->utcp, pkt, sizeof(pkt->hdr) + seglen);
+	debug("%s.%d. c->utcp->send: %p\n", __func__, __LINE__, c->utcp->send);
 		c->utcp->send(c->utcp, pkt, sizeof(pkt->hdr) + seglen);
+	debug("%s.%d. utcp send done\n", __func__, __LINE__);
 	} while(left);
 
 	free(pkt);
 }
 
 ssize_t utcp_send(struct utcp_connection *c, const void *data, size_t len) {
+	debug("%s.%d. Started\n", __func__, __LINE__);
 	if(c->reapable) {
 		debug("Error: send() called on closed connection %p\n", c);
 		errno = EBADF;
 		return -1;
 	}
 
+	debug("%s.%d. c->state\n", __func__, __LINE__);
 	switch(c->state) {
 	case CLOSED:
 	case LISTEN:
@@ -602,24 +656,31 @@ ssize_t utcp_send(struct utcp_connection *c, const void *data, size_t len) {
 
 	// Exit early if we have nothing to send.
 
+	debug("%s.%d. If len = 0\n", __func__, __LINE__);
 	if(!len) {
+	debug("%s.%d. Exit early if we have nothing to send.\n", __func__, __LINE__);
 		return 0;
 	}
 
+	debug("%s.%d. Data is NULL?\n", __func__, __LINE__);
 	if(!data) {
 		errno = EFAULT;
+	debug("%s.%d. Faulty packet\n", __func__, __LINE__);
 		return -1;
 	}
 
 	// Check if we need to be able to buffer all data
 
+	debug("%s.%d. Check if we need to be able to buffer all data\n", __func__, __LINE__);
 	if(c->flags & UTCP_NO_PARTIAL) {
+	debug("%s.%d. Free send buffer\n", __func__, __LINE__);
 		if(len > buffer_free(&c->sndbuf)) {
 			if(len > c->sndbuf.maxsize) {
 				errno = EMSGSIZE;
 				return -1;
 			} else {
 				errno = EWOULDBLOCK;
+	debug("%s.%d. Would block\n", __func__, __LINE__);
 				return 0;
 			}
 		}
@@ -627,17 +688,22 @@ ssize_t utcp_send(struct utcp_connection *c, const void *data, size_t len) {
 
 	// Add data to send buffer.
 
+	debug("%s.%d. Add data to send buffer\n", __func__, __LINE__);
 	if(is_reliable(c) || (c->state != SYN_SENT && c->state != SYN_RECEIVED)) {
 		len = buffer_put(&c->sndbuf, data, len);
 	} else {
+	debug("%s.%d. Is not reliable\n", __func__, __LINE__);
 		return 0;
 	}
 
+	debug("%s.%d. if len is -ve\n", __func__, __LINE__);
 	if(len <= 0) {
 		if(is_reliable(c)) {
+	debug("%s.%d. if reliable then error as would block\n", __func__, __LINE__);
 			errno = EWOULDBLOCK;
 			return 0;
 		} else {
+	debug("%s.%d. Return len\n", __func__, __LINE__);
 			return len;
 		}
 	}
@@ -646,30 +712,38 @@ ssize_t utcp_send(struct utcp_connection *c, const void *data, size_t len) {
 
 	// Don't send anything yet if the connection has not fully established yet
 
+	debug("%s.%d. Don't send anything yet if the connection has not fully established yet\n", __func__, __LINE__);
 	if(c->state == SYN_SENT || c->state == SYN_RECEIVED) {
+	debug("%s.%d. SYN send and received\n", __func__, __LINE__);
 		return len;
 	}
 
+	debug("%s.%d. Send ACK\n", __func__, __LINE__);
 	ack(c, false);
 
+	debug("%s.%d. Is not reliable hen discard and poll\n", __func__, __LINE__);
 	if(!is_reliable(c)) {
 		c->snd.una = c->snd.nxt = c->snd.last;
 		buffer_get(&c->sndbuf, NULL, c->sndbuf.used);
 	}
 
+	debug("%s.%d. Is reliable and rtxx set\n", __func__, __LINE__);
 	if(is_reliable(c) && !timerisset(&c->rtrx_timeout)) {
 		start_retransmit_timer(c);
 	}
 
+	debug("%s.%d. Is reliable and connection set\n", __func__, __LINE__);
 	if(is_reliable(c) && !timerisset(&c->conn_timeout)) {
 		gettimeofday(&c->conn_timeout, NULL);
 		c->conn_timeout.tv_sec += c->utcp->timeout;
 	}
 
+	debug("%s.%d. Done\n", __func__, __LINE__);
 	return len;
 }
 
 static void swap_ports(struct hdr *hdr) {
+	debug("%s.%d. Called\n", __func__, __LINE__);
 	uint16_t tmp = hdr->src;
 	hdr->src = hdr->dst;
 	hdr->dst = tmp;
@@ -913,19 +987,23 @@ static void handle_incoming_data(struct utcp_connection *c, uint32_t seq, const 
 
 	uint32_t offset = seqdiff(seq, c->rcv.nxt);
 
+	debug("%s.%d. offset len > max rcv buf size?\n", __func__, __LINE__);
 	if(offset + len > c->rcvbuf.maxsize) {
 		abort();
 	}
 
+	debug("%s.%d. Handle the offset, in or out of order\n", __func__, __LINE__);
 	if(offset) {
 		handle_out_of_order(c, offset, data, len);
 	} else {
 		handle_in_order(c, data, len);
 	}
+	debug("%s.%d. Done\n", __func__, __LINE__);
 }
 
 
 ssize_t utcp_recv(struct utcp *utcp, const void *data, size_t len) {
+	debug("%s.%d. Started\n", __func__, __LINE__);
 	const uint8_t *ptr = data;
 
 	if(!utcp) {
@@ -963,10 +1041,12 @@ ssize_t utcp_recv(struct utcp *utcp, const void *data, size_t len) {
 
 	if(hdr.ctl & ~(SYN | ACK | RST | FIN)) {
 		errno = EBADMSG;
+	debug("%s.%d. Bad msg\n", __func__, __LINE__);
 		return -1;
 	}
 
 	// Check for auxiliary headers
+	debug("%s.%d. Check for auxiliary headers\n", __func__, __LINE__);
 
 	const uint8_t *init = NULL;
 
@@ -978,13 +1058,16 @@ ssize_t utcp_recv(struct utcp *utcp, const void *data, size_t len) {
 
 		if(len < auxlen) {
 			errno = EBADMSG;
+	debug("%s.%d. EBADMSG\n", __func__, __LINE__);
 			return -1;
 		}
 
+	debug("%s.%d. Switch aux type\n", __func__, __LINE__);
 		switch(auxtype) {
 		case AUX_INIT:
 			if(!(hdr.ctl & SYN) || auxlen != 4) {
 				errno = EBADMSG;
+	debug("%s.%d. BAD MSG\n", __func__, __LINE__);
 				return -1;
 			}
 
@@ -993,6 +1076,7 @@ ssize_t utcp_recv(struct utcp *utcp, const void *data, size_t len) {
 
 		default:
 			errno = EBADMSG;
+	debug("%s.%d. BAD MSG\n", __func__, __LINE__);
 			return -1;
 		}
 
@@ -1005,6 +1089,7 @@ ssize_t utcp_recv(struct utcp *utcp, const void *data, size_t len) {
 
 		if(len < 2) {
 			errno = EBADMSG;
+	debug("%s.%d. BAD MSG\n", __func__, __LINE__);
 			return -1;
 		}
 
@@ -1021,34 +1106,44 @@ ssize_t utcp_recv(struct utcp *utcp, const void *data, size_t len) {
 
 	// Is it for a new connection?
 
+	debug("%s.%d. Is it for a new connection?\n", __func__, __LINE__);
 	if(!c) {
 		// Ignore RST packets
 
+	debug("%s.%d. Ignore RST packets\n", __func__, __LINE__);
 		if(hdr.ctl & RST) {
+	debug("%s.%d. Ignored RST packets\n", __func__, __LINE__);
 			return 0;
 		}
 
 		// Is it a SYN packet and are we LISTENing?
 
+	debug("%s.%d. Is it a SYN packet and are we LISTENing?\n", __func__, __LINE__);
 		if(hdr.ctl & SYN && !(hdr.ctl & ACK) && utcp->accept) {
 			// If we don't want to accept it, send a RST back
+	debug("%s.%d. If we don't want to accept it, send a RST back\n", __func__, __LINE__);
 			if((utcp->pre_accept && !utcp->pre_accept(utcp, hdr.dst))) {
 				len = 1;
+	debug("%s.%d. reset\n", __func__, __LINE__);
 				goto reset;
 			}
 
 			// Try to allocate memory, otherwise send a RST back
 			c = allocate_connection(utcp, hdr.dst, hdr.src);
+	debug("%s.%d. allocated memory, otherwise sent a RST back\n", __func__, __LINE__);
 
 			if(!c) {
 				len = 1;
+	debug("%s.%d. reset\n", __func__, __LINE__);
 				goto reset;
 			}
 
 			// Parse auxilliary information
+	debug("%s.%d. Parse auxilliary information\n", __func__, __LINE__);
 			if(init) {
 				if(init[0] < 1) {
 					len = 1;
+	debug("%s.%d. reset\n", __func__, __LINE__);
 					goto reset;
 				}
 
@@ -1059,6 +1154,7 @@ ssize_t utcp_recv(struct utcp *utcp, const void *data, size_t len) {
 
 synack:
 			// Return SYN+ACK, go to SYN_RECEIVED state
+	debug("%s.%d. Return SYN+ACK, go to SYN_RECEIVED state\n", __func__, __LINE__);
 			c->snd.wnd = hdr.wnd;
 			c->rcv.irs = hdr.seq;
 			c->rcv.nxt = c->rcv.irs + 1;
@@ -1076,6 +1172,7 @@ synack:
 			pkt.hdr.wnd = c->rcv.wnd;
 			pkt.hdr.ctl = SYN | ACK;
 
+	debug("%s.%d. Send SYN ACK\n", __func__, __LINE__);
 			if(init) {
 				pkt.hdr.aux = 0x0101;
 				pkt.data[0] = 1;
@@ -1091,10 +1188,12 @@ synack:
 			}
 		} else {
 			// No, we don't want your packets, send a RST back
+	debug("%s.%d. No, we don't want your packets, send a RST back\n", __func__, __LINE__);
 			len = 1;
 			goto reset;
 		}
 
+	debug("%s.%d. Synack done\n", __func__, __LINE__);
 		return 0;
 	}
 
@@ -1113,6 +1212,7 @@ synack:
 	// 1. Drop invalid packets.
 
 	// 1a. Drop packets that should not happen in our current state.
+	debug("%s.%d. Drop packets that should not happen in our current state.\n", __func__, __LINE__);
 
 	switch(c->state) {
 	case SYN_SENT:
@@ -1135,6 +1235,7 @@ synack:
 
 	// 1b. Discard data that is not in our receive window.
 
+	debug("%s.%d. Discard data that is not in our receive window.\n", __func__, __LINE__);
 	if(is_reliable(c)) {
 		bool acceptable;
 
@@ -1177,6 +1278,7 @@ synack:
 	// 1c. Drop packets with an invalid ACK.
 	// ackno should not roll back, and it should also not be bigger than what we ever could have sent
 	// (= snd.una + c->sndbuf.used).
+	debug("%s.%d.  Drop packets with an invalid ACK\n", __func__, __LINE__);
 
 	if(!is_reliable(c)) {
 		if(hdr.ack != c->snd.last && c->state >= ESTABLISHED) {
@@ -1188,15 +1290,18 @@ synack:
 		debug("Packet ack seqno out of range, %u <= %u < %u\n", c->snd.una, hdr.ack, c->snd.una + c->sndbuf.used);
 
 		// Ignore unacceptable RST packets.
+	debug("%s.%d.  Ignore unacceptable RST packets.\n", __func__, __LINE__);
 		if(hdr.ctl & RST) {
 			return 0;
 		}
 
+	debug("%s.%d.  goto reset\n", __func__, __LINE__);
 		goto reset;
 	}
 
 	// 2. Handle RST packets
 
+	debug("%s.%d.  Handle RST packets\n", __func__, __LINE__);
 	if(hdr.ctl & RST) {
 		switch(c->state) {
 		case SYN_SENT:
@@ -1277,18 +1382,24 @@ synack:
 
 	uint32_t advanced;
 
+	debug("%s.%d. if header is ACK\n", __func__, __LINE__);
 	if(!(hdr.ctl & ACK)) {
 		advanced = 0;
+	debug("%s.%d. goto skip_ack\n", __func__, __LINE__);
 		goto skip_ack;
 	}
 
 	// 3. Advance snd.una
 
+	debug("%s.%d. After snd.una\n", __func__, __LINE__);
 	advanced = seqdiff(hdr.ack, c->snd.una);
+	debug("%s.%d. If advanced\n", __func__, __LINE__);
 
 	if(advanced) {
+	debug("%s.%d. Advanced, RTT measurement\n", __func__, __LINE__);
 		// RTT measurement
 		if(c->rtt_start.tv_sec) {
+	debug("%s.%d. If RTT start\n", __func__, __LINE__);
 			if(c->rtt_seq == hdr.ack) {
 				struct timeval now, diff;
 				gettimeofday(&now, NULL);
@@ -1298,15 +1409,20 @@ synack:
 			} else if(c->rtt_seq < hdr.ack) {
 				debug("Cancelling RTT measurement: %u < %u\n", c->rtt_seq, hdr.ack);
 				c->rtt_start.tv_sec = 0;
+				debug("%s.%d. c->rtt_start.tv_sec reset\n", __func__, __LINE__);
 			}
+	debug("%s.%d. out of rtt measurement\n", __func__, __LINE__);
 		}
+	debug("%s.%d. out advanced condition\n", __func__, __LINE__);
 
 		int32_t data_acked = advanced;
 
 		switch(c->state) {
 		case SYN_SENT:
 		case SYN_RECEIVED:
+	debug("%s.%d. SYN_RECEIVED\n", __func__, __LINE__);
 			data_acked--;
+	debug("%s.%d. SYN_RECEIVED, data_acked--\n", __func__, __LINE__);
 			break;
 
 		// TODO: handle FIN as well.
@@ -1314,6 +1430,7 @@ synack:
 			break;
 		}
 
+	debug("%s.%d. data_acked is -ve?\n", __func__, __LINE__);
 		assert(data_acked >= 0);
 
 #ifndef NDEBUG
@@ -1321,48 +1438,66 @@ synack:
 		assert(data_acked <= bufused);
 #endif
 
+	debug("%s.%d. if data_acked\n", __func__, __LINE__);
 		if(data_acked) {
+	debug("%s.%d. discard send buffer, data acked\n", __func__, __LINE__);
 			buffer_get(&c->sndbuf, NULL, data_acked);
 		}
 
 		// Also advance snd.nxt if possible
+	debug("%s.%d. Also advance snd.nxt if possible\n", __func__, __LINE__);
 		if(seqdiff(c->snd.nxt, hdr.ack) < 0) {
+	debug("%s.%d. send next with ack header\n", __func__, __LINE__);
 			c->snd.nxt = hdr.ack;
+	debug("%s.%d. send next with ack header is set to the connection\n", __func__, __LINE__);
 		}
 
+	debug("%s.%d. send next with ack header\n", __func__, __LINE__);
 		c->snd.una = hdr.ack;
 
 		c->dupack = 0;
 		c->snd.cwnd += utcp->mtu;
 
 		if(c->snd.cwnd > c->sndbuf.maxsize) {
+	debug("%s.%d. Set send cwnd to max size\n", __func__, __LINE__);
 			c->snd.cwnd = c->sndbuf.maxsize;
 		}
+	debug("%s.%d. Print cwnd\n", __func__, __LINE__);
 
 		// Check if we have sent a FIN that is now ACKed.
+	debug("%s.%d. Check if we have sent a FIN that is now ACKed\n", __func__, __LINE__);
 		switch(c->state) {
 		case FIN_WAIT_1:
+	debug("%s.%d. If connetion state is FIN_WAIT_1\n", __func__, __LINE__);
 			if(c->snd.una == c->snd.last) {
+	debug("%s.%d. Set connection state to FIN_WAIT_2\n", __func__, __LINE__);
 				set_state(c, FIN_WAIT_2);
 			}
+	debug("%s.%d. Case FIN_WAIT_1 break\n", __func__, __LINE__);
 
 			break;
 
 		case CLOSING:
+	debug("%s.%d. If connetion state is CLOSING\n", __func__, __LINE__);
 			if(c->snd.una == c->snd.last) {
 				gettimeofday(&c->conn_timeout, NULL);
 				c->conn_timeout.tv_sec += utcp->timeout;
+	debug("%s.%d. Set connection state to TIME_WAIT\n", __func__, __LINE__);
 				set_state(c, TIME_WAIT);
 			}
+	debug("%s.%d. Case CLOSING break\n", __func__, __LINE__);
 
 			break;
 
 		default:
 			break;
 		}
+	debug("%s.%d. Validated if we have sent a FIN that is now ACKed\n", __func__, __LINE__);
 	} else {
+	debug("%s.%d. If not advanced\n", __func__, __LINE__);
 		if(!len && is_reliable(c)) {
 			c->dupack++;
+			debug("duplicate ACK %d\n", c->dupack);
 
 			if(c->dupack == 3) {
 				debug("Triplicate ACK\n");
@@ -1374,29 +1509,38 @@ synack:
 				start_retransmit_timer(c);
 			}
 		}
+	debug("%s.%d. Else advanced end\n", __func__, __LINE__);
 	}
 
 	// 4. Update timers
 
+	debug("%s.%d. Update timers\n", __func__, __LINE__);
 	if(advanced) {
+	debug("%s.%d. If advanced\n", __func__, __LINE__);
 		if(c->snd.una == c->snd.last) {
+	debug("%s.%d. Stop retransmit timer\n", __func__, __LINE__);
 			stop_retransmit_timer(c);
 			timerclear(&c->conn_timeout);
 		} else if(is_reliable(c)) {
+	debug("%s.%d. Else if connection is reliable\n", __func__, __LINE__);
 			start_retransmit_timer(c);
 			gettimeofday(&c->conn_timeout, NULL);
 			c->conn_timeout.tv_sec += utcp->timeout;
+	debug("%s.%d. Increased connection timeout by utcp timeout\n", __func__, __LINE__);
 		}
 	}
+	debug("%s.%d. Updated timers\n", __func__, __LINE__);
 
 skip_ack:
 	// 5. Process SYN stuff
 
+	debug("%s.%d. Process SYN stuff\n", __func__, __LINE__);
 	if(hdr.ctl & SYN) {
 		switch(c->state) {
 		case SYN_SENT:
 
 			// This is a SYNACK. It should always have ACKed the SYN.
+	debug("%s.%d. This is a SYNACK. It should always have ACKed the SYN.\n", __func__, __LINE__);
 			if(!advanced) {
 				goto reset;
 			}
@@ -1410,12 +1554,14 @@ skip_ack:
 			} else {
 				set_state(c, ESTABLISHED);
 			}
+	debug("%s.%d. Setting the state is done\n", __func__, __LINE__);
 
 			// TODO: notify application of this somehow.
 			break;
 
 		case SYN_RECEIVED:
 			// This is a retransmit of a SYN, send back the SYNACK.
+	debug("%s.%d. This is a retransmit of a SYN, send back the SYNACK.\n", __func__, __LINE__);
 			goto synack;
 
 		case ESTABLISHED:
@@ -1426,6 +1572,7 @@ skip_ack:
 		case LAST_ACK:
 		case TIME_WAIT:
 			// Ehm, no. We should never receive a second SYN.
+	debug("%s.%d. Ehm, no. We should never receive a second SYN.\n", __func__, __LINE__);
 			return 0;
 
 		default:
@@ -1436,34 +1583,44 @@ skip_ack:
 		}
 
 		// SYN counts as one sequence number
+	debug("%s.%d. SYN counts as one sequence number\n", __func__, __LINE__);
 		c->rcv.nxt++;
 	}
 
 	// 6. Process new data
 
+	debug("%s.%d. Process new data\n", __func__, __LINE__);
 	if(c->state == SYN_RECEIVED) {
 		// This is the ACK after the SYNACK. It should always have ACKed the SYNACK.
+	debug("%s.%d. This is the ACK after the SYNACK. It should always have ACKed the SYNACK.\n", __func__, __LINE__);
 		if(!advanced) {
+	debug("%s.%d. If not advaced reset\n", __func__, __LINE__);
 			goto reset;
 		}
 
 		// Are we still LISTENing?
+	debug("%s.%d. Are we still LISTENing?\n", __func__, __LINE__);
 		if(utcp->accept) {
+	debug("%s.%d. Invoke accept cb\n", __func__, __LINE__);
 			utcp->accept(c, c->src);
 		}
 
+	debug("%s.%d. If not established then close\n", __func__, __LINE__);
 		if(c->state != ESTABLISHED) {
 			set_state(c, CLOSED);
 			c->reapable = true;
+	debug("%s.%d. reap and reaset after close\n", __func__, __LINE__);
 			goto reset;
 		}
 	}
 
+	debug("%s.%d. if len != 0\n", __func__, __LINE__);
 	if(len) {
 		switch(c->state) {
 		case SYN_SENT:
 		case SYN_RECEIVED:
 			// This should never happen.
+	debug("%s.%d. This should never happe\n", __func__, __LINE__);
 #ifdef UTCP_DEBUG
 			abort();
 #endif
@@ -1472,6 +1629,7 @@ skip_ack:
 		case ESTABLISHED:
 		case FIN_WAIT_1:
 		case FIN_WAIT_2:
+	debug("%s.%d. estd, finwait1,2\n", __func__, __LINE__);
 			break;
 
 		case CLOSE_WAIT:
@@ -1479,6 +1637,7 @@ skip_ack:
 		case LAST_ACK:
 		case TIME_WAIT:
 			// Ehm no, We should never receive more data after a FIN.
+	debug("%s.%d. Ehm no, We should never receive more data after a FIN, reset\n", __func__, __LINE__);
 			goto reset;
 
 		default:
@@ -1488,26 +1647,32 @@ skip_ack:
 			return 0;
 		}
 
+	debug("%s.%d. Handle inoming data\n", __func__, __LINE__);
 		handle_incoming_data(c, hdr.seq, ptr, len);
 	}
 
 	// 7. Process FIN stuff
 
+	debug("%s.%d. Process FIN stuff\n", __func__, __LINE__);
 	if((hdr.ctl & FIN) && (!is_reliable(c) || hdr.seq + len == c->rcv.nxt)) {
+	debug("%s.%d. Swith state\n", __func__, __LINE__);
 		switch(c->state) {
 		case SYN_SENT:
 		case SYN_RECEIVED:
 			// This should never happen.
+	debug("%s.%d. This should never happe\n", __func__, __LINE__);
 #ifdef UTCP_DEBUG
 			abort();
 #endif
 			break;
 
 		case ESTABLISHED:
+	debug("%s.%d. Ested, set state to close wait\n", __func__, __LINE__);
 			set_state(c, CLOSE_WAIT);
 			break;
 
 		case FIN_WAIT_1:
+	debug("%s.%d. set state to closing\n", __func__, __LINE__);
 			set_state(c, CLOSING);
 			break;
 
@@ -1515,12 +1680,14 @@ skip_ack:
 			gettimeofday(&c->conn_timeout, NULL);
 			c->conn_timeout.tv_sec += utcp->timeout;
 			set_state(c, TIME_WAIT);
+	debug("%s.%d. Set state to TIME WAIT\n", __func__, __LINE__);
 			break;
 
 		case CLOSE_WAIT:
 		case CLOSING:
 		case LAST_ACK:
 		case TIME_WAIT:
+	debug("%s.%d. CLOSE_WAIT, CLOSE_WAIT, LAST_ACK and TIME_WAIT go reset\n", __func__, __LINE__);
 			// Ehm, no. We should never receive a second FIN.
 			goto reset;
 
@@ -1532,10 +1699,12 @@ skip_ack:
 		}
 
 		// FIN counts as one sequence number
+	debug("%s.%d. FIN counts as one sequence number\n", __func__, __LINE__);
 		c->rcv.nxt++;
 		len++;
 
 		// Inform the application that the peer closed its end of the connection.
+	debug("%s.%d. Inform the application that the peer closed its end of the connection\n", __func__, __LINE__);
 		if(c->recv) {
 			errno = 0;
 			c->recv(c, NULL, 0);
@@ -1548,13 +1717,16 @@ skip_ack:
 	// - or we got an ack, so we should maybe send a bit more data
 	//   -> sendatleastone = false
 
+	debug("%s.%d. send seomething back if possible\n", __func__, __LINE__);
 	if(is_reliable(c) || hdr.ctl & SYN || hdr.ctl & FIN) {
 		ack(c, has_data);
 	}
 
+	debug("%s.%d. Done\n", __func__, __LINE__);
 	return 0;
 
 reset:
+	debug("%s.%d. Start reset\n", __func__, __LINE__);
 	swap_ports(&hdr);
 	hdr.wnd = 0;
 	hdr.aux = 0;
@@ -1570,6 +1742,7 @@ reset:
 
 	print_packet(utcp, "send", &hdr, sizeof(hdr));
 	utcp->send(utcp, &hdr, sizeof(hdr));
+	debug("%s.%d. reset done\n", __func__, __LINE__);
 	return 0;
 
 }
@@ -1589,6 +1762,7 @@ int utcp_shutdown(struct utcp_connection *c, int dir) {
 	}
 
 	if(!(dir == UTCP_SHUT_RD || dir == UTCP_SHUT_WR || dir == UTCP_SHUT_RDWR)) {
+	debug("%s.%d. invalid\n", __func__, __LINE__);
 		errno = EINVAL;
 		return -1;
 	}
@@ -1601,11 +1775,13 @@ int utcp_shutdown(struct utcp_connection *c, int dir) {
 
 	// The rest of the code deals with shutting down writes.
 	if(dir == UTCP_SHUT_RD) {
+	debug("%s.%d. UTCP_SHUT_RD\n", __func__, __LINE__);
 		return 0;
 	}
 
 	// Only process shutting down writes once.
 	if(c->shut_wr) {
+	debug("%s.%d. Only process shutting down writes once\n", __func__, __LINE__);
 		return 0;
 	}
 
@@ -1615,9 +1791,11 @@ int utcp_shutdown(struct utcp_connection *c, int dir) {
 	case CLOSED:
 	case LISTEN:
 		errno = ENOTCONN;
+	debug("%s.%d. ENOTCONN\n", __func__, __LINE__);
 		return -1;
 
 	case SYN_SENT:
+	debug("%s.%d. SYN_SENT\n", __func__, __LINE__);
 		return 0;
 
 	case SYN_RECEIVED:
@@ -1627,6 +1805,7 @@ int utcp_shutdown(struct utcp_connection *c, int dir) {
 
 	case FIN_WAIT_1:
 	case FIN_WAIT_2:
+	debug("%s.%d. FIN_WAIT\n", __func__, __LINE__);
 		return 0;
 
 	case CLOSE_WAIT:
@@ -1636,6 +1815,7 @@ int utcp_shutdown(struct utcp_connection *c, int dir) {
 	case CLOSING:
 	case LAST_ACK:
 	case TIME_WAIT:
+	debug("%s.%d. Closing, last ack, time_wait\n", __func__, __LINE__);
 		return 0;
 	}
 
@@ -1647,12 +1827,15 @@ int utcp_shutdown(struct utcp_connection *c, int dir) {
 		start_retransmit_timer(c);
 	}
 
+	debug("%s.%d. Done\n", __func__, __LINE__);
 	return 0;
 }
 
 static bool reset_connection(struct utcp_connection *c) {
+	debug("%s.%d. Started\n", __func__, __LINE__);
 	if(!c) {
 		errno = EFAULT;
+	debug("%s.%d. EFAULT\n", __func__, __LINE__);
 		return false;
 	}
 
@@ -1667,6 +1850,7 @@ static bool reset_connection(struct utcp_connection *c) {
 
 	switch(c->state) {
 	case CLOSED:
+	debug("%s.%d. Closed \n", __func__, __LINE__);
 		return true;
 
 	case LISTEN:
@@ -1675,6 +1859,7 @@ static bool reset_connection(struct utcp_connection *c) {
 	case LAST_ACK:
 	case TIME_WAIT:
 		set_state(c, CLOSED);
+	debug("%s.%d. Closed\n", __func__, __LINE__);
 		return true;
 
 	case SYN_RECEIVED:
@@ -1683,6 +1868,7 @@ static bool reset_connection(struct utcp_connection *c) {
 	case FIN_WAIT_2:
 	case CLOSE_WAIT:
 		set_state(c, CLOSED);
+	debug("%s.%d. Closed\n", __func__, __LINE__);
 		break;
 	}
 
@@ -1699,19 +1885,24 @@ static bool reset_connection(struct utcp_connection *c) {
 
 	print_packet(c->utcp, "send", &hdr, sizeof(hdr));
 	c->utcp->send(c->utcp, &hdr, sizeof(hdr));
+	debug("%s.%d. Done\n", __func__, __LINE__);
 	return true;
 }
 
 // Closes all the opened connections
 void utcp_abort_all_connections(struct utcp *utcp) {
+	debug("%s.%d. Started\n", __func__, __LINE__);
 	if(!utcp) {
+	debug("%s.%d. Invalid\n", __func__, __LINE__);
 		errno = EINVAL;
 		return;
 	}
 
+	debug("%s.%d. loop connections\n", __func__, __LINE__);
 	for(int i = 0; i < utcp->nconnections; i++) {
 		struct utcp_connection *c = utcp->connections[i];
 
+	debug("%s.%d. Continue if closed or reaped\n", __func__, __LINE__);
 		if(c->reapable || c->state == CLOSED) {
 			continue;
 		}
@@ -1719,39 +1910,49 @@ void utcp_abort_all_connections(struct utcp *utcp) {
 		utcp_recv_t old_recv = c->recv;
 		utcp_poll_t old_poll = c->poll;
 
+	debug("%s.%d. reset connection\n", __func__, __LINE__);
 		reset_connection(c);
 
 		if(old_recv) {
 			errno = 0;
+	debug("%s.%d. old recv\n", __func__, __LINE__);
 			old_recv(c, NULL, 0);
 		}
 
 		if(old_poll && !c->reapable) {
 			errno = 0;
+	debug("%s.%d. old poll 0\n", __func__, __LINE__);
 			old_poll(c, 0);
 		}
 	}
 
+	debug("%s.%d. Done\n", __func__, __LINE__);
 	return;
 }
 
 int utcp_close(struct utcp_connection *c) {
+	debug("%s.%d. Started\n", __func__, __LINE__);
 	if(utcp_shutdown(c, SHUT_RDWR) && errno != ENOTCONN) {
+	debug("%s.%d. utcp_shutdown\n", __func__, __LINE__);
 		return -1;
 	}
 
 	c->recv = NULL;
 	c->poll = NULL;
 	c->reapable = true;
+	debug("%s.%d. Reset and reap the connection\n", __func__, __LINE__);
 	return 0;
 }
 
 int utcp_abort(struct utcp_connection *c) {
+	debug("%s.%d. Started\n", __func__, __LINE__);
 	if(!reset_connection(c)) {
+	debug("%s.%d. reset connection failed\n", __func__, __LINE__);
 		return -1;
 	}
 
 	c->reapable = true;
+	debug("%s.%d. done\n", __func__, __LINE__);
 	return 0;
 }
 
@@ -1833,12 +2034,16 @@ struct timeval utcp_timeout(struct utcp *utcp) {
 }
 
 bool utcp_is_active(struct utcp *utcp) {
+	debug("%s.%d. Started\n", __func__, __LINE__);
 	if(!utcp) {
+	debug("%s.%d. invalid\n", __func__, __LINE__);
 		return false;
 	}
 
+	debug("%s.%d. Loop connctions\n", __func__, __LINE__);
 	for(int i = 0; i < utcp->nconnections; i++)
 		if(utcp->connections[i]->state != CLOSED && utcp->connections[i]->state != TIME_WAIT) {
+	debug("%s.%d. active\n", __func__, __LINE__);
 			return true;
 		}
 
@@ -1940,41 +2145,53 @@ void utcp_reset_timers(struct utcp *utcp) {
 	if(utcp->rto > START_RTO) {
 		utcp->rto = START_RTO;
 	}
+	debug("%s.%d. Done\n", __func__, __LINE__);
 }
 
 int utcp_get_user_timeout(struct utcp *u) {
+	debug("%s.%d. Called\n", __func__, __LINE__);
 	return u ? u->timeout : 0;
 }
 
 void utcp_set_user_timeout(struct utcp *u, int timeout) {
+	debug("%s.%d. Called\n", __func__, __LINE__);
 	if(u) {
 		u->timeout = timeout;
 	}
 }
 
 size_t utcp_get_sndbuf(struct utcp_connection *c) {
+	debug("%s.%d. Called\n", __func__, __LINE__);
 	return c ? c->sndbuf.maxsize : 0;
 }
 
 size_t utcp_get_sndbuf_free(struct utcp_connection *c) {
+	debug("%s.%d. Called\n", __func__, __LINE__);
 	if(!c) {
+	debug("%s.%d. faulty\n", __func__, __LINE__);
 		return 0;
 	}
 
+	debug("%s.%d. Switch to state\n", __func__, __LINE__);
 	switch(c->state) {
 	case SYN_SENT:
 	case SYN_RECEIVED:
 	case ESTABLISHED:
 	case CLOSE_WAIT:
+	debug("%s.%d. free buffer\n", __func__, __LINE__);
 		return buffer_free(&c->sndbuf);
 
 	default:
+	debug("%s.%d. defaylt\n", __func__, __LINE__);
 		return 0;
 	}
+	debug("%s.%d. Done\n", __func__, __LINE__);
 }
 
 void utcp_set_sndbuf(struct utcp_connection *c, size_t size) {
+	debug("%s.%d. Called\n", __func__, __LINE__);
 	if(!c) {
+	debug("%s.%d. Faulty\n", __func__, __LINE__);
 		return;
 	}
 
@@ -1986,18 +2203,24 @@ void utcp_set_sndbuf(struct utcp_connection *c, size_t size) {
 }
 
 size_t utcp_get_rcvbuf(struct utcp_connection *c) {
+	debug("%s.%d. Called\n", __func__, __LINE__);
 	return c ? c->rcvbuf.maxsize : 0;
 }
 
 size_t utcp_get_rcvbuf_free(struct utcp_connection *c) {
+	debug("%s.%d. Called\n", __func__, __LINE__);
 	if(c && (c->state == ESTABLISHED || c->state == CLOSE_WAIT)) {
+	debug("%s.%d. buffer freeing\n", __func__, __LINE__);
 		return buffer_free(&c->rcvbuf);
 	} else {
+	debug("%s.%d. ret 0\n", __func__, __LINE__);
 		return 0;
 	}
+	debug("%s.%d. Done\n", __func__, __LINE__);
 }
 
 void utcp_set_rcvbuf(struct utcp_connection *c, size_t size) {
+	debug("%s.%d. Called\n", __func__, __LINE__);
 	if(!c) {
 		return;
 	}
@@ -2007,60 +2230,74 @@ void utcp_set_rcvbuf(struct utcp_connection *c, size_t size) {
 	if(c->rcvbuf.maxsize != size) {
 		c->rcvbuf.maxsize = -1;
 	}
+	debug("%s.%d. Done\n", __func__, __LINE__);
 }
 
 size_t utcp_get_sendq(struct utcp_connection *c) {
+	debug("%s.%d. Called\n", __func__, __LINE__);
 	return c->sndbuf.used;
 }
 
 size_t utcp_get_recvq(struct utcp_connection *c) {
+	debug("%s.%d. Called\n", __func__, __LINE__);
 	return c->rcvbuf.used;
 }
 
 bool utcp_get_nodelay(struct utcp_connection *c) {
+	debug("%s.%d. Called\n", __func__, __LINE__);
 	return c ? c->nodelay : false;
 }
 
 void utcp_set_nodelay(struct utcp_connection *c, bool nodelay) {
+	debug("%s.%d. Called\n", __func__, __LINE__);
 	if(c) {
 		c->nodelay = nodelay;
 	}
 }
 
 bool utcp_get_keepalive(struct utcp_connection *c) {
+	debug("%s.%d. Called\n", __func__, __LINE__);
 	return c ? c->keepalive : false;
 }
 
 void utcp_set_keepalive(struct utcp_connection *c, bool keepalive) {
+	debug("%s.%d. Called\n", __func__, __LINE__);
 	if(c) {
 		c->keepalive = keepalive;
 	}
 }
 
 size_t utcp_get_outq(struct utcp_connection *c) {
+	debug("%s.%d. Called\n", __func__, __LINE__);
 	return c ? seqdiff(c->snd.nxt, c->snd.una) : 0;
 }
 
 void utcp_set_recv_cb(struct utcp_connection *c, utcp_recv_t recv) {
+	debug("%s.%d. Called\n", __func__, __LINE__);
 	if(c) {
 		c->recv = recv;
 	}
 }
 
 void utcp_set_poll_cb(struct utcp_connection *c, utcp_poll_t poll) {
+	debug("%s.%d. Started\n", __func__, __LINE__);
 	if(c) {
 		c->poll = poll;
 	}
+	debug("%s.%d. Done\n", __func__, __LINE__);
 }
 
 void utcp_set_accept_cb(struct utcp *utcp, utcp_accept_t accept, utcp_pre_accept_t pre_accept) {
+	debug("%s.%d. Called\n", __func__, __LINE__);
 	if(utcp) {
 		utcp->accept = accept;
 		utcp->pre_accept = pre_accept;
 	}
+	debug("%s.%d. Done\n", __func__, __LINE__);
 }
 
 void utcp_expect_data(struct utcp_connection *c, bool expect) {
+	debug("%s.%d. Started\n", __func__, __LINE__);
 	if(!c || c->reapable) {
 		return;
 	}
@@ -2081,26 +2318,33 @@ void utcp_expect_data(struct utcp_connection *c, bool expect) {
 			timerclear(&c->conn_timeout);
 		}
 	}
+	debug("%s.%d. Done\n", __func__, __LINE__);
 }
 
 void utcp_offline(struct utcp *utcp, bool offline) {
 	struct timeval now;
 	gettimeofday(&now, NULL);
 
+	debug("%s.%d. loop connections\n", __func__, __LINE__);
 	for(int i = 0; i < utcp->nconnections; i++) {
 		struct utcp_connection *c = utcp->connections[i];
 
 		if(c->reapable) {
+	debug("%s.%d. closed or reaped connection\n", __func__, __LINE__);
 			continue;
 		}
 
+	debug("%s.%d. utcp_expect_data\n", __func__, __LINE__);
 		utcp_expect_data(c, offline);
 
+	debug("%s.%d. if not offline\n", __func__, __LINE__);
 		if(!offline) {
+	debug("%s.%d. if rtrx_timeout timount is set\n", __func__, __LINE__);
 			if(timerisset(&c->rtrx_timeout)) {
 				c->rtrx_timeout = now;
 			}
 
+	debug("%s.%d. rtt_start = 0\n", __func__, __LINE__);
 			utcp->connections[i]->rtt_start.tv_sec = 0;
 		}
 	}
@@ -2108,4 +2352,5 @@ void utcp_offline(struct utcp *utcp, bool offline) {
 	if(!offline && utcp->rto > START_RTO) {
 		utcp->rto = START_RTO;
 	}
+	debug("%s.%d. Done\n", __func__, __LINE__);
 }
